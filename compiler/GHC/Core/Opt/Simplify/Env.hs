@@ -12,13 +12,13 @@ module GHC.Core.Opt.Simplify.Env (
         smPedanticBottoms, smPlatform,
 
         -- * Environments
-        SimplEnv(..), pprSimplEnv,   -- Temp not abstract
+        SimplEnv(..), StaticEnv, pprSimplEnv,   -- Temp not abstract
         seArityOpts, seCaseCase, seCaseFolding, seCaseMerge, seCastSwizzle,
         seDoEtaReduction, seEtaExpand, seFloatEnable, seInline, seNames,
         seOptCoercionOpts, sePedanticBottoms, sePhase, sePlatform, sePreInline,
         seRuleOpts, seRules, seUnfoldingOpts,
         mkSimplEnv, extendIdSubst, extendCvIdSubst,
-        extendTvSubst, extendCvSubst,
+        extendTvSubst, extendCvSubst, extendSubstForDFun,
         zapSubstEnv, setSubstEnv, bumpCaseDepth,
         getInScope, setInScopeFromE, setInScopeFromF,
         setInScopeSet, modifyInScope, addNewInScopeIds,
@@ -167,6 +167,8 @@ seInlineDepth is used for just one purpose: when we encounter a
 coercion we don't apply optCoercion to it if seInlineDepth>0.
 Reason: it has already been optimised once, no point in doing so again.
 -}
+
+type StaticEnv = SimplEnv       -- Just the static part is relevant
 
 data SimplEnv
   = SimplEnv {
@@ -398,7 +400,6 @@ data SimplSR
        -- and  ja = Just a <=> x is a join-point of arity a
        -- See Note [Join arity in SimplIdSubst]
 
-
   | DoneId OutId
        -- If  x :-> DoneId v   is in the SimplIdSubst
        -- then replace occurrences of x by v
@@ -573,6 +574,20 @@ extendCvSubst env@(SimplEnv {seCvSubst = csubst}) var co
 extendCvIdSubst :: SimplEnv -> Id -> OutExpr -> SimplEnv
 extendCvIdSubst env bndr (Coercion co) = extendCvSubst env bndr co
 extendCvIdSubst env bndr rhs           = extendIdSubst env bndr (DoneEx rhs NotJoinPoint)
+
+extendSubstForDFun :: SimplEnv -> [OutVar] -> [(InExpr,StaticEnv)] -> SimplEnv
+extendSubstForDFun env bndrs args
+  = foldl2 extend env bndrs args
+  where
+    extend env@(SimplEnv {seIdSubst = ids, seCvSubst = cvs, seTvSubst = tvs})
+           bndr (arg,arg_se)
+      | isTyVar bndr, Type ty <- arg
+      = env { seTvSubst = extendVarEnv tvs bndr (substTy arg_se ty) }
+      | isCoVar bndr, Coercion co <- arg
+      = env { seCvSubst = extendVarEnv cvs bndr (substCo arg_se co) }
+      | otherwise
+      = assertPpr (isId bndr) (ppr bndr) $
+        env { seIdSubst = extendVarEnv ids bndr (mkContEx arg_se arg) }
 
 ---------------------
 getInScope :: SimplEnv -> InScopeSet
