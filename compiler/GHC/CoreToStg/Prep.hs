@@ -630,11 +630,10 @@ cpeBind :: TopLevelFlag -> CorePrepEnv -> CoreBind
 cpeBind top_lvl env (NonRec bndr rhs)
   | not (isJoinId bndr)
   = do { (env1, bndr1) <- cpCloneBndr env bndr
-       ; let dmd         = idDemandInfo bndr
-             is_unlifted = isUnliftedType (idType bndr)
+       ; let dmd = idDemandInfo bndr
+             lev = typeLevity (idType bndr)
        ; (floats, rhs1) <- cpePair top_lvl NonRecursive
-                                   dmd is_unlifted
-                                   env bndr1 rhs
+                                   dmd lev env bndr1 rhs
        -- See Note [Inlining in CorePrep]
        ; let triv_rhs = exprIsTrivial rhs1
              env2    | triv_rhs  = extendCorePrepEnvExpr env1 bndr rhs1
@@ -644,7 +643,7 @@ cpeBind top_lvl env (NonRec bndr rhs)
                      | otherwise
                      = snocFloat floats new_float
 
-             new_float = mkNonRecFloat env is_unlifted bndr1 rhs1
+             (new_float, _bndr2) = mkNonRecFloat env lev bndr1 rhs1
 
        ; return (env2, floats1, Nothing) }
 
@@ -660,7 +659,7 @@ cpeBind top_lvl env (Rec pairs)
   | not (isJoinId (head bndrs))
   = do { (env, bndrs1) <- cpCloneBndrs env bndrs
        ; let env' = enterRecGroupRHSs env bndrs1
-       ; stuff <- zipWithM (cpePair top_lvl Recursive topDmd False env')
+       ; stuff <- zipWithM (cpePair top_lvl Recursive topDmd Lifted env')
                            bndrs1 rhss
 
        ; let (zipManyFloats -> floats, rhss1) = unzip stuff
@@ -709,12 +708,12 @@ cpeBind top_lvl env (Rec pairs)
 
 
 ---------------
-cpePair :: TopLevelFlag -> RecFlag -> Demand -> Bool
+cpePair :: TopLevelFlag -> RecFlag -> Demand -> Levity
         -> CorePrepEnv -> OutId -> CoreExpr
         -> UniqSM (Floats, CpeRhs)
 -- Used for all bindings
 -- The binder is already cloned, hence an OutId
-cpePair top_lvl is_rec dmd is_unlifted env bndr rhs
+cpePair top_lvl is_rec dmd lev env bndr rhs
   = assert (not (isJoinId bndr)) $ -- those should use cpeJoinPair
     do { (floats1, rhs1) <- cpeRhsE env rhs
 
@@ -729,9 +728,9 @@ cpePair top_lvl is_rec dmd is_unlifted env bndr rhs
                else warnPprTrace True "CorePrep: silly extra arguments:" (ppr bndr) $
                                -- Note [Silly extra arguments]
                     (do { v <- newVar (idType bndr)
-                        ; let float = mkNonRecFloat env False v rhs2
+                        ; let (float, v') = mkNonRecFloat env Lifted v rhs2
                         ; return ( snocFloat floats2 float
-                                 , cpeEtaExpand arity (Var v)) })
+                                 , cpeEtaExpand arity (Var v')) })
 
         -- Wrap floating ticks
        ; let (floats4, rhs4) = wrapTicks floats3 rhs3
@@ -742,7 +741,7 @@ cpePair top_lvl is_rec dmd is_unlifted env bndr rhs
 
     want_float_from_rhs floats rhs
       | isTopLevel top_lvl = wantFloatTop floats
-      | otherwise          = wantFloatLocal is_rec dmd is_unlifted floats rhs
+      | otherwise          = wantFloatLocal is_rec dmd lev floats rhs
 
 {- Note [Silly extra arguments]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -908,8 +907,7 @@ cpeRhsE env (Case scrut bndr ty alts)
 
        ; case alts'' of
            [Alt DEFAULT _ rhs] -- See Note [Flatten case-binds]
-             | let is_unlifted = isUnliftedType (idType bndr2)
-             , let float = mkCaseFloat is_unlifted bndr2 scrut'
+             | let float = mkCaseFloat bndr2 scrut'
              -> return (snocFloat floats float, rhs)
            _ -> return (floats, Case scrut' bndr2 (cpSubstTy env ty) alts'') }
   where
@@ -1148,8 +1146,7 @@ cpeApp top_env expr
              ; (floats2, thing) <- cpeBody env thing
              ; case_bndr <- newVar ty
              ; let tup = mkCoreUnboxedTuple [token, Var case_bndr]
-             ; let is_unlifted = False -- otherwise seq# would not type-check
-             ; let float = mkCaseFloat is_unlifted case_bndr thing
+             ; let float = mkCaseFloat case_bndr thing
              ; return (floats1 `appFloats` floats2 `snocFloat` float, tup) }
 
     cpe_app env (Var v) args
@@ -1553,9 +1550,9 @@ cpeArg :: CorePrepEnv -> Demand
        -> CoreArg -> UniqSM (Floats, CpeArg)
 cpeArg env dmd arg
   = do { (floats1, arg1) <- cpeRhsE env arg     -- arg1 can be a lambda
-       ; let arg_ty      = exprType arg1
-             is_unlifted = isUnliftedType arg_ty
-             dec         = wantFloatLocal NonRecursive dmd is_unlifted floats1 arg1
+       ; let arg_ty = exprType arg1
+             lev    = typeLevity arg_ty
+             dec    = wantFloatLocal NonRecursive dmd lev floats1 arg1
        ; (floats2, arg2) <- executeFloatDecision dec floats1 arg1
                 -- Else case: arg1 might have lambdas, and we can't
                 --            put them inside a wrapBinds
@@ -1570,8 +1567,9 @@ cpeArg env dmd arg
                  ; let arity = cpeArgArity env dec floats1 arg2
                        arg3  = cpeEtaExpand arity arg2
                        -- See Note [Eta expansion of arguments in CorePrep]
-                 ; let arg_float = mkNonRecFloat env is_unlifted v arg3
-                 ; return (snocFloat floats2 arg_float, varToCoreExpr v) }
+                 ; let (arg_float, v') = mkNonRecFloat env lev v arg3
+                 ---; pprTraceM "cpeArg" (ppr arg1 $$ ppr dec $$ ppr arg2)
+                 ; return (snocFloat floats2 arg_float, varToCoreExpr v') }
        }
 
 cpeArgArity :: CorePrepEnv -> FloatDecision -> Floats -> CoreArg -> Arity
@@ -1793,10 +1791,10 @@ cpeEtaExpand arity expr
 
 Note [Pin demand info on floats]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-We pin demand info on floated lets, so that we can see the one-shot thunks.
+We pin demand info on floated lets, so that we can see one-shot thunks.
 For example,
   f (g x)
-where `f` uses its argument at least once, creates a Float for `y = g x` and we
+where `f` uses its argument at most once, creates a Float for `y = g x` and we
 should better pin appropriate demand info on `y`.
 
 Note [Flatten case-binds]
@@ -1807,7 +1805,7 @@ Suppose we have the following call, where f is strict:
 `case` out because `f` is strict.)
 In Prep, `cpeArg` will ANF-ise that argument, and we'll get a `FloatingBind`
 
-    Float (a = case x of y { DEFAULT -> blah }) CaseBound top_lvl
+    Float (a = case x of y { DEFAULT -> blah }) CaseBound top-lvl
 
 with the call `f a`.  When we wrap that `Float` we will get
 
@@ -1826,8 +1824,8 @@ This is easy to avoid: turn that
 into a FloatingBind of its own.  This is easily done in the Case
 equation for `cpsRhsE`.  Then our example will generate /two/ floats:
 
-    Float (y = x)    CaseBound top_lvl
-    Float (a = blah) CaseBound top_lvl
+    Float (y = x)    CaseBound str-ctx
+    Float (a = blah) CaseBound top-lvl
 
 and we'll end up with nested cases.
 
@@ -1839,6 +1837,124 @@ Of course, the Simplifier never leaves us with an argument like this, but we
 
 and the above footwork in cpsRhsE avoids generating a nested case.
 
+
+Note [Pin evaluatedness on floats]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Consider a call to a CBV function, such as a DataCon worker with *strict* fields,
+in a *lazy* context, such as in the arg of a lazy function call to `f`:
+
+
+  data Box a = Box !a
+  ... f (Box e) ...    -- f lazy, Box strict
+
+(A live example of this is T24730, inspired by $walexGetByte.)
+During ANFisation, we will `mkNonRecFloat` for `e`, binding it to a
+fresh binder `sat`, and binding `Box sat` as well to a fresh binder `sat2`.
+We want to avoid allocating a thunk for `sat2` as often as possible, building
+on the let floating mechanism in Case (2) of Note [wantFloatLocal].
+
+Note that this mechanism requires `sat` to be detected as a value after
+floating out any ok-for-spec floats, according to `exprIsHNF`. This means we
+need an `evaldUnfolding` on `sat`, and `mkNonRecFloat` must do the pinning.
+
+There are two interesting cases:
+
+ 1. When `e = I# (x +# 1#)`, we decompose into
+      case x +# 1# of x' ->
+      ---
+      I# x'
+    where everything above --- are floats and below --- is the residual RHS.
+    Here, `I# x'` is a value because `x'` is (NB: x' is a variable of unlifted type).
+    Following Case (2) of Note [wantFloatLocal], we want to float out the
+    ok-for-spec `x +# 1#` computation in order not to allocate a thunk for Box's
+    field, to get
+      case x +# 1# of x' ->
+      let sat = I# x' in
+      ---
+      Box sat
+    And since we pin an `evaldUnfolding` on `sat`, we may even float out of
+    `f`'s lazy argument, again by Case (2) of Note [wantFloatLocal]
+      case x +# 1# of x' ->
+      let sat = I# x' in
+      let sat2 = Box sat in
+      f sat2
+    If `sat` didn't have the `evaldUnfolding`, we'd get a large thunk in f's arg:
+      let sat2 =
+        case x +# 1# of x' ->
+        let sat = I# x' in
+        Box sat in
+      f sat2
+ 2.
+
+Although `e` might not be a value, it might still decompose into floats that are
+ok-for-spec and a value, for example
+  e = I# (x +# 1#)
+decomposes into
+Following Case (2) of Note [wantFloatLocal], we want to float out the
+ok-for-spec `x +# 1#` computation in order not to allocate a thunk for Box's
+field, to get
+  case x +# 1# of x' ->
+  let sat = I# x' in
+  Box sat
+Nice! But now we want to do the same for the argument to `f`, to get
+  case x +# 1# of x' ->
+  let sat = I# x' in
+  let sat2 = Box sat in
+  f sat2
+(NB: Since all floats are ok-for-spec, we may float out of the lazy argument.)
+BUT, in order to do that in Case (2) of Note [wantFloatLocal], we must detect
+`Box sat` as a value according to `exprIsHNF`; otherwise floating would be
+unproductive. Crucially, this means we need `sat` to look evaluated, because
+it ends up in a strict field.
+We achieve this by attaching and `evaldUnfolding` to `sat` in `mkNonRecFloat`.
+
+*When
+
+ 1. When `e=Just y` is a value, we will float `sat=Just y` as far as possible,
+    to top-level, even. It is important that we mark `sat` as evaluated (via
+    setting its unfolding to `evaldUnfolding`), otherwise we get a superfluous
+    thunk to carry out the field seq on Box's field, because
+    `exprIsHNF sat == False`:
+
+      let sat = Just y in
+      let sat2 = case sat of x { __DEFAULT } -> Box x in
+        -- NONONO, want just `sat2 = Box x`
+      f sat2
+
+    This happened in $walexGetByte, where the thunk caused additional
+    allocation.
+
+ 2. Similarly, when `e` is not a value, we still know that it is strictly
+    evaluated. Hence it is going to be case-bound, and we anticipate that `sat`
+    will be a case binder which is *always* evaluated.
+    Hence in this case, we also mark `sat` as evaluated via its unfolding.
+    This happened in GHC.Linker.Deps.$wgetLinkDeps, where without
+    `evaldUnfolding` we ended up with this:
+
+      Word64Map = ... | Bin ... ... !Word64Map !Word64Map
+      case ... of { Word64Map.Bin a b l r ->
+      case insert ... of sat { __DEFAULT ->
+      case Word64Map.Bin a b l sat of sat2 { __DEFAULT ->
+      f sat2
+      }}}
+
+    Note that *the DataCon app `Bin a b l sat` was case-bound*, because it was
+    not detected to be a value according to `exprIsHNF`.
+    That is because the strict field `sat` lacked the `evaldUnfolding`,
+    although it ended up being case-bound.
+
+    Small wrinkle:
+    It could be that `sat=insert ...` floats to top-level, where it is not
+    eagerly evaluated. In this case, we may not give `sat` an `evaldUnfolding`.
+    We detect this case by looking at the `FloatInfo` of `sat=insert ...`: If
+    it says `TopLvlFloatable`, we are conservative and will not give `sat` an
+    `evaldUnfolding`.
+
+TLDR; when creating a new float `sat=e` in `mkNonRecFloat`, propagate `sat` with
+an `evaldUnfolding` if either
+
+ 1. `e` is a value, or
+ 2. `sat=e` is case-bound, but won't float to top-level.
 
 Note [Speculative evaluation]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2121,64 +2237,94 @@ zipFloats = appFloats
 zipManyFloats :: [Floats] -> Floats
 zipManyFloats = foldr zipFloats emptyFloats
 
-mkCaseFloat :: Bool -> Id -> CpeRhs -> FloatingBind
-mkCaseFloat is_unlifted bndr scrut
-  = Float (NonRec bndr scrut) bound info
-  where
-    (bound, info)
-{-
-Eventually we want the following code, when #20749 is fixed.
-      | is_lifted, is_hnf        = (LetBound,  TopLvlFloatable)
-          -- `seq# (case x of x' { __DEFAULT -> StrictBox x' }) s` should
-          -- let-bind `StrictBox x'` after Note [Flatten case-binds].
--}
-      | exprIsTickedString scrut = (CaseBound, TopLvlFloatable)
-          -- String literals are unboxed (so must be case-bound) and float to
-          -- the top-level
-      | otherwise                = (CaseBound, StrictContextFloatable)
-         -- For a Case, we never want to drop the eval; hence no need to test
-         -- for ok-for-spec-eval
-    _is_lifted   = not is_unlifted
-    _is_hnf      = exprIsHNF scrut
+data FloatInfoArgs
+  = FIA
+  { fia_levity :: Levity
+  , fia_demand :: Demand
+  , fia_is_hnf :: Bool
+  , fia_is_string :: Bool
+  , fia_is_dc_worker :: Bool
+  , fia_ok_for_spec :: Bool
+  }
 
-mkNonRecFloat :: CorePrepEnv -> Bool -> Id -> CpeRhs -> FloatingBind
-mkNonRecFloat env is_unlifted bndr rhs
+defFloatInfoArgs :: Id -> CoreExpr -> FloatInfoArgs
+defFloatInfoArgs bndr rhs
+  = FIA
+  { fia_levity = typeLevity (idType bndr)
+  , fia_demand = idDemandInfo bndr -- mkCaseFloat uses evalDmd
+  , fia_is_hnf = exprIsHNF rhs
+  , fia_is_string = exprIsTickedString rhs
+  , fia_is_dc_worker = isJust (isDataConId_maybe bndr) -- mkCaseFloat uses False
+  , fia_ok_for_spec = False -- mkNonRecFloat uses exprOkForSpecEval
+  }
+
+decideFloatInfo :: FloatInfoArgs -> (BindInfo, FloatInfo)
+decideFloatInfo FIA{fia_levity=lev, fia_demand=dmd, fia_is_hnf=is_hnf,
+                    fia_is_string=is_string, fia_is_dc_worker=is_dc_worker,
+                    fia_ok_for_spec=ok_for_spec}
+  | Lifted <- lev, is_hnf    = (LetBound, TopLvlFloatable)
+      -- is_lifted: We currently don't allow unlifted values at the
+      --            top-level or inside letrecs
+      --            (but SG thinks that in principle, we should)
+  | is_dc_worker             = (LetBound, TopLvlFloatable)
+      -- We need this special case for nullary unlifted DataCon
+      -- workers/wrappers (top-level bindings) until #17521 is fixed
+  | is_string                = (CaseBound, TopLvlFloatable)
+      -- String literals are unboxed (so must be case-bound) and float to
+      -- the top-level
+  | ok_for_spec = (CaseBound, case lev of Unlifted -> LazyContextFloatable
+                                          Lifted   -> TopLvlFloatable)
+      -- See Note [Speculative evaluation]
+      -- Ok-for-spec-eval things will be case-bound, lifted or not.
+      -- But when it's lifted we are ok with floating it to top-level
+      -- (where it is actually bound lazily).
+  | Unlifted <- lev  = (CaseBound, StrictContextFloatable)
+  | isStrUsedDmd dmd = (CaseBound, StrictContextFloatable)
+      -- These will never be floated out of a lazy RHS context
+  | Lifted   <- lev  = (LetBound, TopLvlFloatable)
+      -- And these float freely but can't be speculated, hence LetBound
+
+mkCaseFloat :: Id -> CpeRhs -> FloatingBind
+mkCaseFloat bndr scrut
+  = -- pprTrace "mkCaseFloat" (ppr bndr <+> ppr (bound,info)
+    --                             -- <+> ppr is_lifted <+> ppr is_strict
+    --                             -- <+> ppr ok_for_spec <+> ppr evald
+    --                           $$ ppr scrut) $
+    Float (NonRec bndr scrut) bound info
+  where
+    !(bound, info) = decideFloatInfo $ (defFloatInfoArgs bndr scrut)
+      { fia_demand       = evalDmd
+          -- Strict demand, so that we do not let-bind unless it's a value
+      , fia_is_dc_worker = False
+          -- DataCon worker *bindings* are never case-bound
+      , fia_ok_for_spec  = False
+          -- We do not currently float around case bindings.
+          -- (ok-for-spec case bindings are unlikely anyway.)
+      }
+
+mkNonRecFloat :: CorePrepEnv -> Levity -> Id -> CpeRhs -> (FloatingBind, Id)
+mkNonRecFloat env lev bndr rhs
   = -- pprTrace "mkNonRecFloat" (ppr bndr <+> ppr (bound,info)
-    --                             <+> ppr is_lifted <+> ppr is_strict
-    --                             <+> ppr ok_for_spec
+    --                             <+> if is_strict then text "strict" else if is_lifted then text "lazy" else text "unlifted"
+    --                             <+> if ok_for_spec then text "ok-for-spec" else empty
+    --                             <+> if evald then text "evald" else empty
     --                           $$ ppr rhs) $
-    Float (NonRec bndr rhs) bound info
+    (Float (NonRec bndr' rhs) bound info, bndr')
   where
-    (bound, info)
-      | is_lifted, is_hnf        = (LetBound, TopLvlFloatable)
-          -- is_lifted: We currently don't allow unlifted values at the
-          --            top-level or inside letrecs
-          --            (but SG thinks that in principle, we should)
-      | is_data_con bndr         = (LetBound, TopLvlFloatable)
-          -- We need this special case for nullary unlifted DataCon
-          -- workers/wrappers (top-level bindings) until #17521 is fixed
-      | exprIsTickedString rhs   = (CaseBound, TopLvlFloatable)
-          -- String literals are unboxed (so must be case-bound) and float to
-          -- the top-level
-      | is_unlifted, ok_for_spec = (CaseBound, LazyContextFloatable)
-      | is_lifted,   ok_for_spec = (CaseBound, TopLvlFloatable)
-          -- See Note [Speculative evaluation]
-          -- Ok-for-spec-eval things will be case-bound, lifted or not.
-          -- But when it's lifted we are ok with floating it to top-level
-          -- (where it is actually bound lazily).
-      | is_unlifted || is_strict = (CaseBound, StrictContextFloatable)
-          -- These will never be floated out of a lazy RHS context
-      | otherwise                = assertPpr is_lifted (ppr rhs) $
-                                   (LetBound, TopLvlFloatable)
-          -- And these float freely but can't be speculated, hence LetBound
+    !(bound, info) = decideFloatInfo $ (defFloatInfoArgs bndr rhs)
+      { fia_levity = lev
+      , fia_is_hnf = is_hnf
+      , fia_ok_for_spec = ok_for_spec
+      }
 
-    is_lifted   = not is_unlifted
     is_hnf      = exprIsHNF rhs
-    dmd         = idDemandInfo bndr
-    is_strict   = isStrUsedDmd dmd
     ok_for_spec = exprOkForSpecEval (not . is_rec_call) rhs
     is_rec_call = (`elemUnVarSet` cpe_rec_ids env)
-    is_data_con = isJust . isDataConId_maybe
+
+    -- See Note [Pin evaluatedness on floats]
+    evald = is_hnf --- || (bound == CaseBound && info /= TopLvlFloatable)
+    bndr' | evald     = bndr `setIdUnfolding` evaldUnfolding
+          | otherwise = bndr
 
 -- | Wrap floats around an expression
 wrapBinds :: Floats -> CpeBody -> CpeBody
@@ -2285,6 +2431,10 @@ data FloatDecision
   = FloatNone
   | FloatAll
 
+instance Outputable FloatDecision where
+  ppr FloatNone = text "none"
+  ppr FloatAll  = text "all"
+
 executeFloatDecision :: FloatDecision -> Floats -> CpeRhs -> UniqSM (Floats, CpeRhs)
 executeFloatDecision dec floats rhs
   = case dec of
@@ -2302,12 +2452,12 @@ wantFloatTop fs
   | fs_info fs `floatsAtLeastAsFarAs` TopLvlFloatable = FloatAll
   | otherwise                                         = FloatNone
 
-wantFloatLocal :: RecFlag -> Demand -> Bool -> Floats -> CpeRhs -> FloatDecision
+wantFloatLocal :: RecFlag -> Demand -> Levity -> Floats -> CpeRhs -> FloatDecision
 -- See Note [wantFloatLocal]
-wantFloatLocal is_rec rhs_dmd rhs_is_unlifted floats rhs
+wantFloatLocal is_rec rhs_dmd rhs_lev floats rhs
   |  isEmptyFloats floats -- Well yeah...
   || isStrUsedDmd rhs_dmd -- Case (1) of Note [wantFloatLocal]
-  || rhs_is_unlifted      -- dito
+  || rhs_lev == Unlifted  -- dito
   || (fs_info floats `floatsAtLeastAsFarAs` max_float_info && exprIsHNF rhs)
                           -- Case (2) of Note [wantFloatLocal]
   = FloatAll
@@ -2706,7 +2856,7 @@ cpeBigNatLit env i = assert (i >= 0) $ do
   let
     litAddrRhs = Lit (LitString words)
       -- not "mkLitString"; that does UTF-8 encoding, which we don't want here
-    litAddrFloat = mkNonRecFloat env True litAddrId litAddrRhs
+    (litAddrFloat, litAddrId') = mkNonRecFloat env Unlifted litAddrId litAddrRhs
 
     contentsLength = mkIntLit platform (toInteger (BS.length words))
 
@@ -2719,7 +2869,7 @@ cpeBigNatLit env i = assert (i >= 0) $ do
     copyContentsCall =
       Var (primOpId CopyAddrToByteArrayOp)
         `App` Type realWorldTy
-        `App` Var litAddrId
+        `App` Var litAddrId'
         `App` Var mutableByteArrayId
         `App` mkIntLit platform 0
         `App` contentsLength
