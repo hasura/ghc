@@ -425,7 +425,7 @@ mkRegRegMoveInstr src dst = ANN (text "Reg->Reg Move: " <> ppr src <> text " -> 
 -- | Take the source and destination from this reg -> reg move instruction
 -- or Nothing if it's not one
 takeRegRegMoveInstr :: Instr -> Maybe (Reg,Reg)
---takeRegRegMoveInstr (MOV (OpReg fmt dst) (OpReg fmt' src)) | fmt == fmt' = Just (src, dst)
+takeRegRegMoveInstr (MOV (OpReg fmt dst) (OpReg fmt' src)) | fmt == fmt' = pure (src, dst)
 takeRegRegMoveInstr _ = Nothing
 
 -- | Make an unconditional jump instruction.
