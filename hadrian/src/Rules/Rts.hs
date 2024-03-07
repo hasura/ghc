@@ -53,9 +53,9 @@ withLibffi stage action = needLibffi stage
 -- See Note [Packaging libffi headers] in GHC.Driver.CodeOutput.
 copyLibffiHeader :: Stage -> FilePath -> Action ()
 copyLibffiHeader stage header = do
-    useSystemFfi <- flag UseSystemFfi
+    useSystemFfi <- buildFlag UseSystemFfi stage
     (fromStr, headerDir) <- if useSystemFfi
-        then ("system",) <$> libffiSystemHeaderDir
+        then ("system",) <$> libffiSystemHeaderDir stage
         else needLibffi stage
           >> ("custom",) <$> libffiHeaderDir stage
     copyFile
@@ -122,7 +122,7 @@ rtsLibffiLibrary stage way = do
 needRtsLibffiTargets :: Stage -> Action [FilePath]
 needRtsLibffiTargets stage = do
     rtsPath      <- rtsBuildPath stage
-    useSystemFfi <- flag UseSystemFfi
+    useSystemFfi <- buildFlag UseSystemFfi stage
     jsTarget     <- isJsTarget stage
 
     -- Header files (in the rts build dir).

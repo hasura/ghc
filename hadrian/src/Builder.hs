@@ -28,14 +28,13 @@ import Hadrian.Builder.Tar
 import Hadrian.Oracles.Path
 import Hadrian.Oracles.TextFile
 import Hadrian.Utilities
-import Oracles.Setting (bashPath, targetStage)
 import System.Exit
 import System.IO (stderr)
 
 import Base
 import Context
 import Oracles.Flag
-import Oracles.Setting (setting, Setting(..))
+import Oracles.Setting
 import Packages
 
 import GHC.IO.Encoding (getFileSystemEncoding)
