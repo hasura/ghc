@@ -1746,6 +1746,7 @@ emitPrimOp cfg primop =
   TraceEventBinaryOp -> alwaysExternal
   TraceMarkerOp -> alwaysExternal
   SetThreadAllocationCounter -> alwaysExternal
+  SetOtherThreadAllocationCounter -> alwaysExternal
   KeepAliveOp -> alwaysExternal
   CastWord32ToFloatOp -> alwaysExternal
   CastWord64ToDoubleOp -> alwaysExternal
