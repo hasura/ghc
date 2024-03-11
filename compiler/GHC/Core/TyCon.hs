@@ -25,7 +25,7 @@ module GHC.Core.TyCon(
         mkRequiredTyConBinder,
         mkAnonTyConBinder, mkAnonTyConBinders,
         tyConBinderForAllTyFlag, tyConBndrVisForAllTyFlag, isNamedTyConBinder,
-        isVisibleTyConBinder, isInvisibleTyConBinder,
+        isVisibleTyConBinder, isInvisSpecTyConBinder, isInvisibleTyConBinder,
         isVisibleTcbVis, isInvisSpecTcbVis,
 
         -- ** Field labels
@@ -513,6 +513,10 @@ isVisibleTcbVis AnonTCB        = True
 isInvisSpecTcbVis :: TyConBndrVis -> Bool
 isInvisSpecTcbVis (NamedTCB Specified) = True
 isInvisSpecTcbVis _                    = False
+
+isInvisSpecTyConBinder :: VarBndr tv TyConBndrVis -> Bool
+-- Works for IfaceTyConBinder too
+isInvisSpecTyConBinder (Bndr _ tcb_vis) = isInvisSpecTcbVis tcb_vis
 
 isInvisibleTyConBinder :: VarBndr tv TyConBndrVis -> Bool
 -- Works for IfaceTyConBinder too

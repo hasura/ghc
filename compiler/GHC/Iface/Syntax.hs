@@ -1033,15 +1033,14 @@ pprIfaceDecl ss (IfaceClass { ifName  = clas
 
 pprIfaceDecl ss (IfaceSynonym { ifName    = tc
                               , ifBinders = binders
-                              , ifSynRhs  = mono_ty
+                              , ifSynRhs  = poly_ty
                               , ifResKind = res_kind})
   = vcat [ pprStandaloneKindSig name_doc (mkIfaceTyConKind binders res_kind)
-         , hang (text "type" <+> pprIfaceDeclHead suppress_bndr_sig [] ss tc binders <+> equals)
-           2 (sep [ pprIfaceForAll tvs, pprIfaceContextArr theta, ppr_tau
-                  , ppUnless (isIfaceLiftedTypeKind res_kind) (dcolon <+> ppr res_kind) ])
+         , hang (text "type" <+> pprIfaceDeclHeadInvis suppress_bndr_sig [] ss tc binders tau <+> equals)
+           2 (sep [ pprIfaceForAll tvs, pprIfaceContextArr theta, ppr_tau ])
          ]
   where
-    (tvs, theta, tau) = splitIfaceSigmaTy mono_ty
+    (tvs, theta, tau) = splitIfaceSigmaTy poly_ty
     name_doc = pprPrefixIfDeclBndr (ss_how_much ss) (occName tc)
 
     -- See Note [Printing type abbreviations] in GHC.Iface.Type
@@ -1231,6 +1230,18 @@ pprIfaceDeclHead suppress_sig context ss tc_occ bndrs
         , pprPrefixIfDeclBndr (ss_how_much ss) (occName tc_occ)
           <+> pprIfaceTyConBinders suppress_sig
                 (suppressIfaceInvisibles (PrintExplicitKinds print_kinds) bndrs bndrs) ]
+
+pprIfaceDeclHeadInvis :: SuppressBndrSig
+                 -> IfaceContext -> ShowSub -> Name
+                 -> [IfaceTyConBinder]   -- of the tycon, for invisible-suppression
+                 -> IfaceType -- RHS
+                 -> SDoc
+pprIfaceDeclHeadInvis suppress_sig context ss tc_occ bndrs rhs
+  = sdocOption sdocPrintExplicitKinds $ \print_kinds ->
+    sep [ pprIfaceContextArr context
+        , pprPrefixIfDeclBndr (ss_how_much ss) (occName tc_occ)
+          <+> pprIfaceTyConBinders suppress_sig
+                (suppressIfaceInsignificantInvisibles (PrintExplicitKinds print_kinds) rhs bndrs) ]
 
 pprIfaceConDecl :: ShowSub -> Bool
                 -> IfaceTopBndr

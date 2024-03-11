@@ -54,7 +54,7 @@ module GHC.Iface.Type (
         pprIfaceCoTcApp, pprTyTcApp, pprIfacePrefixApp,
         isIfaceRhoType,
 
-        suppressIfaceInvisibles,
+        suppressIfaceInvisibles, suppressIfaceInsignificantInvisibles,
         stripIfaceInvisVars,
         stripInvisArgs,
 
@@ -521,6 +521,26 @@ suppressIfaceInvisibles (PrintExplicitKinds False) tys xs = suppress tys xs
         | isInvisibleTyConBinder k =     suppress ks xs
         | otherwise                = x : suppress ks xs
 
+-- Invisible binder is considered significant when it meet at least
+-- one of two following criteria:
+--   - It visibly occurs in the RHS type
+--   - It is not followed by a visible binder, so it
+--     affects arity of type synonym
+suppressIfaceInsignificantInvisibles :: PrintExplicitKinds -> IfaceType -> [IfaceTyConBinder] -> [IfaceTyConBinder]
+suppressIfaceInsignificantInvisibles (PrintExplicitKinds True) _rhs tys = tys
+suppressIfaceInsignificantInvisibles (PrintExplicitKinds False) rhs tys = suppress [] tys
+    where
+      mentioned_var var = ifTyConBinderName var `ifTypeVarVisiblyOccurs` rhs
+
+      mentioned_vars vars =
+        filter mentioned_var vars
+
+      suppress acc []     = reverse acc
+      suppress acc (k:ks) = case binderFlag k of
+          NamedTCB Specified -> suppress (k : acc) ks
+          NamedTCB Inferred  -> suppress acc ks
+          _                  -> reverse (mentioned_vars acc) ++ k : suppress [] ks
+
 stripIfaceInvisVars :: PrintExplicitKinds -> [IfaceTyConBinder] -> [IfaceTyConBinder]
 stripIfaceInvisVars (PrintExplicitKinds True)  tyvars = tyvars
 stripIfaceInvisVars (PrintExplicitKinds False) tyvars
@@ -560,6 +580,27 @@ ifTypeIsVarFree ty = go ty
 
     go_args IA_Nil = True
     go_args (IA_Arg arg _ args) = go arg && go_args args
+
+ifTypeVarVisiblyOccurs :: IfLclName -> IfaceType -> Bool
+-- Returns True if the type contains this name. Doesn't count
+-- invisible application
+-- Just used to control pretty printing
+ifTypeVarVisiblyOccurs name ty = go ty
+  where
+    go (IfaceTyVar var)         = var == name
+    go (IfaceFreeTyVar {})      = False
+    go (IfaceAppTy fun args)    = go fun || go_args args
+    go (IfaceFunTy _ w arg res) = go w || go arg || go res
+    go (IfaceForAllTy bndr ty)  = go (ifaceBndrType (binderVar bndr)) || go ty
+    go (IfaceTyConApp _ args)  = go_args args
+    go (IfaceTupleTy _ _ args) = go_args args
+    go (IfaceLitTy _)          = False
+    go (IfaceCastTy {})        = False -- Safe
+    go (IfaceCoercionTy {})    = False -- Safe
+
+    go_args IA_Nil = False
+    go_args (IA_Arg arg Required args) = go arg || go_args args
+    go_args (IA_Arg _arg _ args) = go_args args
 
 {- Note [Substitution on IfaceType]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
