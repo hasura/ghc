@@ -138,21 +138,21 @@ data CrossEmulator
 -- | A BuildConfig records all the options which can be modified to affect the
 -- bindists produced by the compiler.
 data BuildConfig
-  = BuildConfig { withDwarf      :: Bool
-                , unregisterised :: Bool
-                , buildFlavour   :: BaseFlavour
-                , bignumBackend  :: BignumBackend
-                , llvmBootstrap  :: Bool
-                , withAssertions :: Bool
-                , withNuma       :: Bool
-                , withZstd       :: Bool
-                , crossTarget    :: Maybe String
-                , crossEmulator  :: CrossEmulator
+  = BuildConfig { withDwarf        :: Bool
+                , unregisterised   :: Bool
+                , buildFlavour     :: BaseFlavour
+                , bignumBackend    :: BignumBackend
+                , llvmBootstrap    :: Bool
+                , withAssertions   :: Bool
+                , withNuma         :: Bool
+                , withZstd         :: Bool
+                , crossTarget      :: Maybe String
+                , crossEmulator    :: CrossEmulator
                 , configureWrapper :: Maybe String
-                , fullyStatic    :: Bool
+                , fullyStatic      :: Bool
                 , tablesNextToCode :: Bool
-                , threadSanitiser :: Bool
-                , noSplitSections :: Bool
+                , threadSanitiser  :: Bool
+                , noSplitSections  :: Bool
                 , validateNonmovingGc :: Bool
                 }
 
@@ -175,7 +175,8 @@ mkJobFlavour BuildConfig{..} = Flavour buildFlavour opts
            [FullyStatic | fullyStatic] ++
            [ThreadSanitiser | threadSanitiser] ++
            [NoSplitSections | noSplitSections, buildFlavour == Release ] ++
-           [BootNonmovingGc | validateNonmovingGc ]
+           [BootNonmovingGc | validateNonmovingGc ] ++
+           [Assertions | withAssertions ]
 
 data Flavour = Flavour BaseFlavour [FlavourTrans]
 
@@ -186,6 +187,7 @@ data FlavourTrans =
     | ThreadSanitiser
     | NoSplitSections
     | BootNonmovingGc
+    | Assertions
 
 data BaseFlavour = Release | Validate | SlowValidate deriving Eq
 
@@ -344,6 +346,7 @@ flavourString (Flavour base trans) = base_string base ++ concatMap (("+" ++) . f
     flavour_string ThreadSanitiser = "thread_sanitizer"
     flavour_string NoSplitSections = "no_split_sections"
     flavour_string BootNonmovingGc = "boot_nonmoving_gc"
+    flavour_string Assertions = "assertions"
 
 -- The path to the docker image (just for linux builders)
 dockerImage :: Arch -> Opsys -> Maybe String
@@ -954,6 +957,11 @@ validateBuilds a op bc = StandardTriple { v = Just (validate a op bc)
                                         , n = Just (nightly a op bc)
                                         , r = Nothing }
 
+nightlyBuilds :: Arch -> Opsys -> BuildConfig -> JobGroup Job
+nightlyBuilds a op bc = StandardTriple { v = Nothing
+                                       , n = Just (nightly a op bc)
+                                       , r = Nothing }
+
 flattenJobGroup :: JobGroup a -> [(String, a)]
 flattenJobGroup (StandardTriple a b c) = map flattenNamedJob (catMaybes [a,b,c])
 
@@ -981,6 +989,8 @@ job_groups =
      , onlyRule LLVMBackend (validateBuilds Amd64 (Linux Debian12) llvm)
      , disableValidate (standardBuilds Amd64 (Linux Debian11))
      , disableValidate (standardBuilds Amd64 (Linux Debian12))
+     , nightlyBuilds Amd64 (Linux Debian12) (releaseConfig { withAssertions = True })
+     , nightlyBuilds AArch64 (Linux Debian10) (releaseConfig { withAssertions = True })
      -- We still build Deb9 bindists for now due to Ubuntu 18 and Linux Mint 19
      -- not being at EOL until April 2023 and they still need tinfo5.
      , disableValidate (standardBuildsWithConfig Amd64 (Linux Debian9) (splitSectionsBroken vanilla))
