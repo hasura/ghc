@@ -461,6 +461,8 @@ data PsMessage
 
    | PsErrInvalidPun !PsErrPunDetails
 
+   | PsErrSpecEpxrMultipleTypeAscription
+
    deriving Generic
 
 -- | Extra details about a parse error, which helps

@@ -532,6 +532,10 @@ instance Diagnostic PsMessage where
         , text "Use" <+> quotes (text "Sum<n># a b c ...") <+> text "to refer to the type constructor."
         ]
 
+    PsErrSpecEpxrMultipleTypeAscription
+      -> mkSimpleDecorated $
+        text "SPECIALIZE expression doesn't support multiple specialize type ascriptions"
+
   diagnosticReason  = \case
     PsUnknownMessage m                            -> diagnosticReason m
     PsHeaderMessage  m                            -> psHeaderMessageReason m
@@ -647,6 +651,7 @@ instance Diagnostic PsMessage where
     PsErrMultipleConForNewtype {}                 -> ErrorWithoutFlag
     PsErrUnicodeCharLooksLike{}                   -> ErrorWithoutFlag
     PsErrInvalidPun {}                            -> ErrorWithoutFlag
+    PsErrSpecEpxrMultipleTypeAscription{}         -> ErrorWithoutFlag
 
   diagnosticHints = \case
     PsUnknownMessage m                            -> diagnosticHints m
@@ -813,6 +818,7 @@ instance Diagnostic PsMessage where
     PsErrMultipleConForNewtype {}                 -> noHints
     PsErrUnicodeCharLooksLike{}                   -> noHints
     PsErrInvalidPun {}                            -> [suggestExtension LangExt.ListTuplePuns]
+    PsErrSpecEpxrMultipleTypeAscription {}        -> noHints
 
   diagnosticCode = constructorCode
 
