@@ -1126,7 +1126,8 @@ tcRule (HsRule { rd_ext  = ext
 
 mkTcRuleBndrs :: RuleBndrs GhcRn -> [Var] -> RuleBndrs GhcTc
 mkTcRuleBndrs (RuleBndrs { rb_tyvs = tyvs }) vars
-  = RuleBndrs { rb_tyvs = tyvs -- preserved for ppr-ing
+  = RuleBndrs { rb_ext = noAnn
+              , rb_tyvs = tyvs -- preserved for ppr-ing
               , rb_tmvs = map (noLocA . RuleBndr noAnn . noLocA) vars }
 
 generateRuleConstraints :: SkolemInfo
