@@ -609,3 +609,6 @@ test('T23400', [], compile_and_run, ['-with-rtsopts -A8k'])
 test('IOManager', [js_skip, when(arch('wasm32'), skip), when(opsys('mingw32'), skip),
                    pre_cmd('$MAKE -s --no-print-directory IOManager.hs')],
                   compile_and_run, [''])
+
+test('T20201a', exit_code(1), compile_and_run, ['-with-rtsopts -AturtlesM'])
+test('T20201b', exit_code(1), compile_and_run, ['-with-rtsopts -A64z'])
