@@ -1862,11 +1862,6 @@ hscGenHardCode hsc_env cgguts location output_filename = do
           tmpfs  = hsc_tmpfs hsc_env
           llvm_config = hsc_llvm_config hsc_env
           profile = targetProfile dflags
-          data_tycons = filter isDataTyCon tycons
-          -- cg_tycons includes newtypes, for the benefit of External Core,
-          -- but we don't generate any code for newtypes
-
-
 
         -------------------
         -- PREPARE FOR CODE GENERATION
@@ -1877,7 +1872,7 @@ hscGenHardCode hsc_env cgguts location output_filename = do
             (hsc_logger hsc_env)
             cp_cfg
             (initCorePrepPgmConfig (hsc_dflags hsc_env) (interactiveInScope $ hsc_IC hsc_env))
-            this_mod location late_binds data_tycons
+            this_mod location late_binds tycons
 
         -----------------  Convert to STG ------------------
         (stg_binds_with_deps, denv, (caf_ccs, caf_cc_stacks), stg_cg_infos)
@@ -1938,7 +1933,7 @@ hscGenHardCode hsc_env cgguts location output_filename = do
             _          ->
               do
               cmms <- {-# SCC "StgToCmm" #-}
-                doCodeGen hsc_env this_mod denv data_tycons
+                doCodeGen hsc_env this_mod denv tycons
                 cost_centre_info
                 stg_binds hpc_info
 
@@ -1995,10 +1990,6 @@ hscInteractive hsc_env cgguts location = do
                cgi_modBreaks = mod_breaks,
                cgi_spt_entries = spt_entries } = cgguts
 
-        data_tycons = filter isDataTyCon tycons
-        -- cg_tycons includes newtypes, for the benefit of External Core,
-        -- but we don't generate any code for newtypes
-
     -------------------
     -- PREPARE FOR CODE GENERATION
     -- Do saturation and convert to A-normal form
@@ -2008,7 +1999,7 @@ hscInteractive hsc_env cgguts location = do
         (hsc_logger hsc_env)
         cp_cfg
         (initCorePrepPgmConfig (hsc_dflags hsc_env) (interactiveInScope $ hsc_IC hsc_env))
-        this_mod location core_binds data_tycons
+        this_mod location core_binds tycons
 
     -- The stg cg info only provides a runtime benfit, but is not requires so we just
     -- omit it here
@@ -2019,7 +2010,7 @@ hscInteractive hsc_env cgguts location = do
     let (stg_binds,_stg_deps) = unzip stg_binds_with_deps
 
     -----------------  Generate byte code ------------------
-    comp_bc <- byteCodeGen hsc_env this_mod stg_binds data_tycons mod_breaks
+    comp_bc <- byteCodeGen hsc_env this_mod stg_binds tycons mod_breaks
     ------------------ Create f-x-dynamic C-side stuff -----
     (_istub_h_exists, istub_c_exists)
         <- outputForeignStubs logger tmpfs dflags (hsc_units hsc_env) this_mod location foreign_stubs
@@ -2140,7 +2131,7 @@ doCodeGen :: HscEnv -> Module -> InfoTableProvMap -> [TyCon]
          -- Note we produce a 'Stream' of CmmGroups, so that the
          -- backend can be run incrementally.  Otherwise it generates all
          -- the C-- up front, which has a significant space cost.
-doCodeGen hsc_env this_mod denv data_tycons
+doCodeGen hsc_env this_mod denv tycons
               cost_centre_info stg_binds_w_fvs hpc_info = do
     let dflags     = hsc_dflags hsc_env
         logger     = hsc_logger hsc_env
@@ -2159,7 +2150,7 @@ doCodeGen hsc_env this_mod denv data_tycons
     let cmm_stream :: Stream IO CmmGroup ModuleLFInfos
         -- See Note [Forcing of stg_binds]
         cmm_stream = stg_binds_w_fvs `seqList` {-# SCC "StgToCmm" #-}
-            stg_to_cmm dflags this_mod denv data_tycons cost_centre_info stg_binds_w_fvs hpc_info
+            stg_to_cmm dflags this_mod denv tycons cost_centre_info stg_binds_w_fvs hpc_info
 
         -- codegen consumes a stream of CmmGroup, and produces a new
         -- stream of CmmGroup (not necessarily synchronised: one
@@ -2371,8 +2362,6 @@ hscParsedDecls hsc_env decls = runInteractiveHsc hsc_env $ do
                     , md_fam_insts = fam_insts } = mod_details
             -- Get the *tidied* cls_insts and fam_insts
 
-        data_tycons = filter isDataTyCon tycons
-
     {- Prepare For Code Generation -}
     -- Do saturation and convert to A-normal form
     prepd_binds <- {-# SCC "CorePrep" #-} liftIO $ do
@@ -2381,7 +2370,7 @@ hscParsedDecls hsc_env decls = runInteractiveHsc hsc_env $ do
         (hsc_logger hsc_env)
         cp_cfg
         (initCorePrepPgmConfig (hsc_dflags hsc_env) (interactiveInScope $ hsc_IC hsc_env))
-        this_mod iNTERACTIVELoc core_binds data_tycons
+        this_mod iNTERACTIVELoc core_binds tycons
 
     (stg_binds_with_deps, _infotable_prov, _caf_ccs__caf_cc_stacks, _stg_cg_info)
         <- {-# SCC "CoreToStg" #-}
@@ -2397,7 +2386,7 @@ hscParsedDecls hsc_env decls = runInteractiveHsc hsc_env $ do
 
     {- Generate byte code -}
     cbc <- liftIO $ byteCodeGen hsc_env this_mod
-                                stg_binds data_tycons mod_breaks
+                                stg_binds tycons mod_breaks
 
     let src_span = srcLocSpan interactiveSrcLoc
     _ <- liftIO $ loadDecls interp hsc_env src_span cbc
