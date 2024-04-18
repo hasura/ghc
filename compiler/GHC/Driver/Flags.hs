@@ -299,6 +299,7 @@ data GeneralFlag
    | Opt_CmmElimCommonBlocks
    | Opt_CmmControlFlow
    | Opt_AsmShortcutting
+   | Opt_HugeCodeSections
    | Opt_OmitYields
    | Opt_FunToThunk               -- deprecated
    | Opt_DictsStrict                     -- be strict in argument dictionaries
@@ -541,6 +542,7 @@ optimisationFlags = EnumSet.fromList
    , Opt_CmmSink
    , Opt_CmmElimCommonBlocks
    , Opt_AsmShortcutting
+   , Opt_HugeCodeSections
    , Opt_FunToThunk
    , Opt_DmdTxDictSel
    , Opt_Loopification

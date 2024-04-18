@@ -596,6 +596,24 @@ as such you shouldn't need to set any of them explicitly. A flag
     ``-fno-full-laziness``. If that is inconvenient for you, please leave a
     comment `on the issue tracker (#21204) <https://gitlab.haskell.org/ghc/ghc/-/issues/21204>`__.
 
+.. ghc-flag:: -fhuge-code-sections
+    :shortdesc: Assume code sections can be unreasonably large.
+    :type: dynamic
+    :reverse: -fno-huge-code-sections
+    :category:
+
+    :default: Enabled by default on aarch64 macOS. Otherwise defaults to no.
+
+    In some niche scenarious one can end up with code sections large enough to prevent the
+    linker from properly relocating jumps. (:ghc-ticket:`24648`)
+
+    In such cases this flag causes all jumps to targets outside of the currently
+    compiled module to be generated in a way that allows for larger jump offsets
+    at the cost of performance.
+
+    Note that this flag currently only affects the NCG AArch64 backend.
+
+
 .. ghc-flag:: -fignore-asserts
     :shortdesc: Ignore assertions in the source. Implied by :ghc-flag:`-O`.
     :type: dynamic
