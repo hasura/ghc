@@ -3,15 +3,17 @@ module GHC.Core.LateCC.TopLevelBinds where
 
 import GHC.Prelude
 
-import GHC.Core
--- import GHC.Core.LateCC
 import GHC.Core.LateCC.Types
 import GHC.Core.LateCC.Utils
+
+import GHC.Core
 import GHC.Core.Opt.Monad
 import GHC.Driver.DynFlags
 import GHC.Types.Id
 import GHC.Types.Name
 import GHC.Unit.Module.ModGuts
+
+import Data.Maybe
 
 {- Note [Collecting late cost centres]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -89,15 +91,20 @@ topLevelBindsCC pred core_bind =
 
     doBndr :: Id -> CoreExpr -> LateCCM s CoreExpr
     doBndr bndr rhs
-      -- Cost centres on constructor workers are pretty much useless
-      -- so we don't emit them if we are looking at the rhs of a constructor
-      -- binding.
-      | Just _ <- isDataConId_maybe bndr = pure rhs
-      | otherwise = if pred rhs then addCC bndr rhs else pure rhs
+      -- Not a constructor worker.
+      -- Cost centres on constructor workers are pretty much useless so we don't emit them
+      -- if we are looking at the rhs of a constructor binding.
+      | isNothing (isDataConId_maybe bndr)
+      , pred rhs
+      = addCC bndr rhs
+      | otherwise = pure rhs
 
     -- We want to put the cost centre below the lambda as we only care about
-    -- executions of the RHS.
+    -- executions of the RHS. Note that the lambdas might be hidden under ticks
+    -- or casts. So look through these as well.
     addCC :: Id -> CoreExpr -> LateCCM s CoreExpr
+    addCC bndr (Cast rhs co) = pure Cast <*> addCC bndr rhs <*> pure co
+    addCC bndr (Tick t rhs) = (Tick t) <$> addCC bndr rhs
     addCC bndr (Lam b rhs) = Lam b <$> addCC bndr rhs
     addCC bndr rhs = do
       let name = idName bndr
