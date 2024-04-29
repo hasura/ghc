@@ -2228,7 +2228,7 @@ exprIsHNFlike is_con is_con_unf e
           -- The obvious definition regresses T16577 by 30% so we don't do it.
 
         check_arg a_ty a
-          | mightBeUnliftedType a_ty = is_hnf_like a
+          | mightBeUnliftedType a_ty = exprOkForSpeculation a -- is_hnf_like a
           | otherwise                = True
          -- Check unliftedness; for example f (x /# 12#) where f has arity two,
          -- and the first argument is unboxed. This is not a value!
@@ -2236,8 +2236,9 @@ exprIsHNFlike is_con is_con_unf e
          -- NB: We check arity (and CONLIKEness) first because it's cheaper
          --     and we reject quickly on saturated apps.
         check_field a_ty str a
-          | isMarkedStrict str || mightBeUnliftedType a_ty = is_hnf_like a
-          | otherwise                                      = True
+          | mightBeUnliftedType a_ty = exprOkForSpeculation a -- is_hnf_like a
+          | isMarkedStrict str       = is_hnf_like a
+          | otherwise                = True
           -- isMarkedStrict: Respect Note [Strict fields in Core]
 
         mb_str_marks id
