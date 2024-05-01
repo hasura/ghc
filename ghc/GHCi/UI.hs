@@ -223,6 +223,7 @@ ghciCommands = map mkCmd [
   ("history",   keepGoingMulti historyCmd,           noCompletion),
   ("info",      keepGoingMulti' (info False),        completeIdentifier),
   ("info!",     keepGoingMulti' (info True),         completeIdentifier),
+  ("normalize", keepGoingMulti' normalize,         completeIdentifier),
   ("issafe",    keepGoing' isSafeCmd,           completeModule),
   ("ignore",    keepGoing ignoreCmd,            noCompletion),
   ("kind",      keepGoingMulti' (kindOfType False),  completeIdentifier),
@@ -363,6 +364,8 @@ defFullHelpText =
   "   :edit <file>                edit file\n" ++
   "   :edit                       edit last module\n" ++
   "   :help, :?                   display this list of commands\n" ++
+  "   :normalize [(<type>) ...]   normalize type family synonyms and print declaration\n" ++
+  "                               as if it was written by hand." ++
   "   :info[!] [<name> ...]       display information about the given names\n" ++
   "                               (!: do not filter instances)\n" ++
   "   :instances <type>           display the class instances available for <type>\n" ++
@@ -1618,6 +1621,44 @@ pprInfo (thing, fixity, cls_insts, fam_insts, docs)
   $$ showFixity thing fixity
   $$ vcat (map GHC.pprInstance cls_insts)
   $$ vcat (map GHC.pprFamInst  fam_insts)
+
+-----------------------------------------------------------------------------
+-- :normalize
+
+normalize :: String -> m ()
+normalize = undefined
+
+-- NOTE use namesAreInParenthesis in this
+normalizeType :: String -> m ()
+normalizeType str = do
+  names <- GHC.parseName str
+  mb_stuff <- mapM (GHC.getInfo False) names
+  case mb_stuff of
+    Nothing -> undefined
+    Just x -> undefined
+
+pprDummyDataDeclaration :: TyThing -> SDoc
+pprDummyDataDeclaration = undefined
+
+{- Note [Arguments of the normalize command]
+:normalize, like :info, can take multiple arguments; Which is why the arguments
+should always be inside parenthesis. Even if they are type constructors of kind *.
+Here is an example:
+
+Assume type family RetInt a where RetInt a = Int
+
+:normalize (Bool) (Either String (RetInt Bool))
+
+results in:
+
+data Bool = True | False
+
+data Either String (RetInt Bool) = Left String | Right Int
+
+:normalize Bool
+-}
+
+namesAreInParenthesis = undefined
 
 -----------------------------------------------------------------------------
 -- :main
