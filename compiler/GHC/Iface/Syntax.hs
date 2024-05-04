@@ -44,6 +44,7 @@ module GHC.Iface.Syntax (
         -- Pretty printing
         pprIfaceExpr,
         pprIfaceDecl,
+        pprIfaceConDecl,
         AltPpr(..), ShowSub(..), ShowHowMuch(..), showToIface, showToHeader
     ) where
 
@@ -909,7 +910,7 @@ pprIfaceDecl ss (IfaceData { ifName = tycon, ifCType = ctype,
 
   | gadt      = vcat [ pp_roles
                      , pp_ki_sig
-                     , pp_nd <+> pp_lhs <+> pp_kind <+> pp_where
+                     , pp_nd <+> pp_lhs <+> pp_kind <+> text "where"
                      , nest 2 (vcat pp_cons)
                      , nest 2 $ ppShowIface ss pp_extra ]
   | otherwise = vcat [ pp_roles
@@ -926,7 +927,6 @@ pprIfaceDecl ss (IfaceData { ifName = tycon, ifCType = ctype,
     forall_bndrs = [Bndr (binderVar tc_bndr) Specified | tc_bndr <- binders]
 
     cons       = visibleIfConDecls condecls
-    pp_where   = ppWhen (gadt && not (null cons)) $ text "where"
     pp_cons    = ppr_trim (map show_con cons) :: [SDoc]
     pp_kind    = ppUnless (ki_sig_printable || isIfaceLiftedTypeKind kind)
                           (dcolon <+> ppr kind)

@@ -44,10 +44,12 @@ import GHCi.BreakArray( breakOn, breakOff )
 import GHC.ByteCode.Types
 import GHC.Core.DataCon
 import GHC.Core.ConLike
+import GHC.Core.TyCon
 import GHC.Core.PatSyn
 import GHC.Driver.Flags
 import GHC.Driver.Errors
 import GHC.Driver.Errors.Types
+import GHC.Types.Var.Env
 import GHC.Driver.Phases
 import GHC.Driver.Session as DynFlags
 import GHC.Driver.Ppr hiding (printForUser)
@@ -73,7 +75,15 @@ import GHC.Types.SafeHaskell ( getSafeMode )
 import GHC.Types.SourceError ( SourceError )
 import GHC.Types.Name
 import GHC.Types.Var ( varType )
-import GHC.Iface.Syntax ( showToHeader )
+import GHC.Iface.Type
+import GHC.Iface.Syntax ( IfaceConDecls(..)
+                        , IfaceDecl(..)
+                        , IfaceFamTyConFlav(..)
+                        , IfaceTyConParent(..)
+                        , showToHeader
+                        , pprIfaceConDecl
+                        )
+import GHC.Iface.Decl ( tyConToIfaceDecl )
 import GHC.Builtin.Names
 import GHC.Builtin.Types( stringTyCon_RDR )
 import GHC.Types.Name.Reader as RdrName ( getGRE_NameQualifier_maybes, getRdrName )
@@ -1625,41 +1635,93 @@ pprInfo (thing, fixity, cls_insts, fam_insts, docs)
 -----------------------------------------------------------------------------
 -- :normalize
 
-normalize :: String -> m ()
-normalize = undefined
+normalize :: GHC.GhcMonad m => String -> m ()
+normalize "" = throwGhcException (CmdLineError "normalize needs arguments to work on!")
+normalize s = do
+  forM_ (words s) $ \str -> do
+    -- stuff <- mapM (GHC.getInfo False) name
+    rendered <- showSDocForUser' (ppr @FastString "blah")
+    liftIO (putStrLn rendered)
+  where
+    isInParenthesis ("(":xs) = True
+    isInParenthesis _ = False
 
--- NOTE use namesAreInParenthesis in this
-normalizeType :: String -> m ()
-normalizeType str = do
-  names <- GHC.parseName str
-  mb_stuff <- mapM (GHC.getInfo False) names
-  case mb_stuff of
-    Nothing -> undefined
-    Just x -> undefined
+normalizeDecl :: GHC.GhcMonad m => IfaceDecl -> [Name] -> m IfaceDecl
+normalizeDecl decl@(IfaceData {..}) args
+  | null args = pure decl
+  | otherwise = do
+      let dummyIfName = ppr ifName <+> hsep (map ppr args)
+      return undefined
+normalizeDecl _ _ = throwGhcException (CmdLineError "blah")
 
-pprDummyDataDeclaration :: TyThing -> SDoc
-pprDummyDataDeclaration = undefined
+
+pprNormalizedDeclaration :: GHC.GhcMonad m => TyCon -> String -> m SDoc
+pprNormalizedDeclaration con str = undefined . snd $ tyConToIfaceDecl emptyTidyEnv con
+  where
+    replaceUniversals = undefined
 
 {- Note [Arguments of the normalize command]
 :normalize, like :info, can take multiple arguments; Which is why the arguments
-should always be inside parenthesis. Even if they are type constructors of kind *.
+should always be inside parenthesis. Even if they are type constructors of kind Type.
 Here is an example:
 
 Assume type family RetInt a where RetInt a = Int
 
-:normalize (Bool) (Either String (RetInt Bool))
+:normalize (Bool) (Either String (RetInt Bool)) -- GOOD
 
 results in:
 
-data Bool = True | False
+Bool = True | False
 
-data Either String (RetInt Bool) = Left String | Right Int
+Either String (RetInt Bool) = Left String | Right Int
 
-:normalize Bool
+:normalize Bool -- BAD
 -}
 
-namesAreInParenthesis = undefined
 
+data TypeAnnDataDecl -- This could probably use a better name
+      =
+  MkTadd
+    { tadTypeCons :: FastString
+    , tadArguments :: [IfaceType]
+    , tadCons :: IfaceConDecls
+    , tadBinders :: [IfaceTyConBinder]
+    , tadCtx :: IfaceContext
+    , tadParent :: IfaceTyConParent
+    , tadGADTSyntax :: Bool
+    }
+
+
+--data TypeAnnConDecl = MkTacd
+
+instance Outputable TypeAnnDataDecl where
+  ppr = pprTypeAnnDataDecl
+
+
+pprTypeAnnDataDecl :: TypeAnnDataDecl -> SDoc
+pprTypeAnnDataDecl (MkTadd {tadTypeCons = tycon,
+                            tadArguments = args,
+                            tadCons = conss,
+                            tadBinders = binders,
+                            tadParent = parent,
+                            tadCtx = ctx,
+                            tadGADTSyntax = gadt})
+
+  | gadt      = vcat [pp_tycon_applied <+> pp_where
+                     ,nest 2 (vcat pp_conss)]
+  | otherwise = hang pp_tycon_applied 2 (add_bars pp_conss)
+  where
+    pp_tycon_applied = ppr tycon <+> hsep (map ppr args)
+    pp_where = text "where"
+    pp_conss = [text "Blah Cons", text "Cons Blah", text "Foo Bar"] -- map show_con conss
+
+    show_con = undefined --pprIfaceConDecl showToHeader gadt tycon binders parent
+
+    add_bars []     = empty
+    add_bars (c:cs) = sep ((equals <+> c) : map (vbar <+>) cs)
+
+ifaceDeclToTypeAnnDataDecl :: IfaceDecl -> Maybe TypeAnnDataDecl
+ifaceDeclToTypeAnnDataDecl = undefined
 -----------------------------------------------------------------------------
 -- :main
 
