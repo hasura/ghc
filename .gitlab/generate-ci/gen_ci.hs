@@ -112,6 +112,7 @@ data LinuxDistro
   | Debian9
   | Fedora33
   | Fedora38
+  | Ubuntu2404
   | Ubuntu2004
   | Ubuntu1804
   | Centos7
@@ -295,6 +296,7 @@ distroName Fedora33   = "fedora33"
 distroName Fedora38   = "fedora38"
 distroName Ubuntu1804 = "ubuntu18_04"
 distroName Ubuntu2004 = "ubuntu20_04"
+distroName Ubuntu2404 = "ubuntu24_04"
 distroName Centos7    = "centos7"
 distroName Alpine312  = "alpine3_12"
 distroName Alpine318  = "alpine3_18"
@@ -987,6 +989,7 @@ job_groups =
      , disableValidate (standardBuildsWithConfig Amd64 (Linux Debian9) (splitSectionsBroken vanilla))
      , disableValidate (standardBuilds Amd64 (Linux Ubuntu1804))
      , disableValidate (standardBuilds Amd64 (Linux Ubuntu2004))
+     , disableValidate (standardBuilds Amd64 (Linux Ubuntu2404))
      , disableValidate (standardBuilds Amd64 (Linux Rocky8))
      , disableValidate (standardBuildsWithConfig Amd64 (Linux Centos7) (splitSectionsBroken vanilla))
      -- Fedora33 job is always built with perf so there's one job in the normal
