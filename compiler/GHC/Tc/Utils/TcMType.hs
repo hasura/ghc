@@ -1590,6 +1590,7 @@ collect_cand_qtvs_co orig_ty cur_lvl bound = go_co
     go_prov dv (PhantomProv co)    = go_co dv co
     go_prov dv (ProofIrrelProv co) = go_co dv co
     go_prov dv (PluginProv _ cvs)  = strictFoldDVarSet zt_cv (return dv) cvs
+    go_prov dv (UnaryClassProv {}) = return dv
 
     zt_cv :: CoVar -> TcM CandidatesQTvs -> TcM CandidatesQTvs
     zt_cv cv mdvs = do { dvs <- mdvs; go_cv dvs cv }

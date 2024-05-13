@@ -283,7 +283,7 @@ tcLocalBinds (HsIPBinds x (IPBinds _ ip_binds)) thing_inside
         -- We don't have linear implicit parameters, yet. So the wrapper can be
         -- the identity.
         -- See Note [Wrapper returned from tcSubMult] in GHC.Tc.Utils.Unify.
-        ; return (HsIPBinds x (IPBinds ev_binds ip_binds') , idHsWrapper, result) }
+        ; return (HsIPBinds x (IPBinds ev_binds ip_binds'), idHsWrapper, result) }
   where
     ips = [ip | (L _ (IPBind _ (L _ ip) _)) <- ip_binds]
 
@@ -296,18 +296,7 @@ tcLocalBinds (HsIPBinds x (IPBinds _ ip_binds)) thing_inside
             ; let p = mkStrLitTy $ hsIPNameFS ip
             ; ip_id <- newDict ipClass [p, ty]
             ; expr' <- tcCheckMonoExpr expr ty
-            ; let d = toDict (idType ip_id) expr'
-            ; return (ip_id, (IPBind ip_id l_name d)) }
-
-    toDict :: Type   -- IP "x" t
-           -> LHsExpr GhcTc   -- def'n of IP variable
-           -> LHsExpr GhcTc   -- dictionary for IP
-    toDict dict_ty (L loc expr)
-      = L loc $ HsApp noExtField (L loc inst_con) (L loc expr)
-      where
-        (_, con, tys) = decomposeIP dict_ty
-        inst_con = mkHsWrap (mkWpTyApps tys) $
-                   HsVar noExtField (noLocA (dataConWorkId con))
+            ; return (ip_id, IPBind ip_id l_name expr') }
 
 -- Why an HsWrapper? See Note [Wrapper returned from tcSubMult] in GHC.Tc.Utils.Unify.
 tcValBinds :: TopLevelFlag
