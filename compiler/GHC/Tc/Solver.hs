@@ -47,7 +47,7 @@ import GHC.Tc.Errors
 import GHC.Tc.Errors.Types
 import GHC.Tc.Types.Evidence
 import GHC.Tc.Solver.Solve   ( solveSimpleGivens, solveSimpleWanteds )
-import GHC.Tc.Solver.Dict    ( makeSuperClasses, solveCallStack )
+import GHC.Tc.Solver.Dict    ( makeSuperClasses )
 import GHC.Tc.Solver.Rewrite ( rewriteType )
 import GHC.Tc.Utils.Unify    ( buildTvImplication )
 import GHC.Tc.Utils.TcMType as TcM
@@ -700,23 +700,26 @@ type CtDefaultingStrategy = Ct -> MaybeT TcS ()
 -- | Default @ExceptionContext@ constraints to @emptyExceptionContext@.
 defaultExceptionContext :: CtDefaultingStrategy
 defaultExceptionContext ct
-  = do { ClassPred cls tys <- pure $ classifyPredType (ctPred ct)
+  = do { let ev   = ctEvidence ct
+             pred = ctEvPred ev
+       ; ClassPred cls tys <- pure $ classifyPredType pred
        ; Just {} <- pure $ isExceptionContextPred cls tys
-       ; emptyEC <- Var <$> lift (lookupId emptyExceptionContextName)
-       ; let ev = ctEvidence ct
-       ; let ev_tm = mkEvCast emptyEC (wrapIP (ctEvPred ev))
-       ; lift $ warnTcS $ TcRnDefaultedExceptionContext (ctLoc ct)
-       ; lift $ setEvBindIfWanted ev False ev_tm
-       }
+       ; lift $ do { empty_id <- lookupId emptyExceptionContextName
+                   ; warnTcS $ TcRnDefaultedExceptionContext (ctLoc ct)
+                   ; setEvBindIfWanted ev False (EvExpr (evWrapIP pred (Var empty_id)))
+       } }
 
 -- | Default any remaining @CallStack@ constraints to empty @CallStack@s.
 -- See Note [Overview of implicit CallStacks] in GHC.Tc.Types.Evidence
 defaultCallStack :: CtDefaultingStrategy
 defaultCallStack ct
-  = do { ClassPred cls tys <- pure $ classifyPredType (ctPred ct)
+  = do { let ev   = ctEvidence ct
+             pred = ctEvPred ev
+       ; ClassPred cls tys <- pure $ classifyPredType pred
        ; Just {} <- pure $ isCallStackPred cls tys
-       ; lift $ solveCallStack (ctEvidence ct) EvCsEmpty
-       }
+       ; lift $ do { empty_id <- lookupId emptyCallStackName
+                   ; setEvBindIfWanted ev True (EvExpr (evWrapIP pred (Var empty_id)))
+       } }
 
 defaultConstraints :: [CtDefaultingStrategy]
                    -> WantedConstraints

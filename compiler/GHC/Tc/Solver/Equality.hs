@@ -2987,7 +2987,7 @@ tryFunDeps work_item@(EqCt { eq_lhs = lhs, eq_ev = ev })
 
 --------------------
 improveTopFunEqs :: TyCon -> [TcType] -> EqCt -> TcS Bool
--- See Note [FunDep and implicit parameter reactions]
+-- See Note [FunDep and implicit parameter reactions] in GHC.Tc.Solver.Dict
 improveTopFunEqs fam_tc args (EqCt { eq_ev = ev, eq_rhs = rhs })
   | isGiven ev
   = return False  -- See Note [No Given/Given fundeps]
@@ -3088,7 +3088,7 @@ improveLocalFunEqs :: InertCans -> TyCon -> [TcType] -> EqCt -> TcS Bool
 -- the current work item with inert CFunEqs
 -- E.g.   x + y ~ z,   x + y' ~ z   =>   [W] y ~ y'
 --
--- See Note [FunDep and implicit parameter reactions]
+-- See Note [FunDep and implicit parameter reactions] in GHC.Tc.Solver.Dict
 improveLocalFunEqs inerts fam_tc args (EqCt { eq_ev = work_ev, eq_rhs = rhs })
   | null improvement_eqns
   = return False

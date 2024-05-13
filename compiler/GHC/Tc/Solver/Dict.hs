@@ -6,7 +6,6 @@ module GHC.Tc.Solver.Dict (
   checkInstanceOK,
   matchLocalInst, chooseInstance,
   makeSuperClasses, mkStrictSuperClasses,
-  solveCallStack    -- For GHC.Tc.Solver
   ) where
 
 import GHC.Prelude
@@ -17,7 +16,6 @@ import GHC.Tc.Instance.Class( safeOverlap, matchEqualityInst )
 import GHC.Tc.Types.Evidence
 import GHC.Tc.Types.Constraint
 import GHC.Tc.Types.Origin
-import GHC.Tc.Types.EvTerm( evCallStack )
 import GHC.Tc.Solver.InertSet
 import GHC.Tc.Solver.Monad
 import GHC.Tc.Solver.Types
@@ -27,6 +25,7 @@ import GHC.Tc.Utils.Unify( uType )
 import GHC.Hs.Type( HsIPName(..) )
 
 import GHC.Core
+import GHC.Core.Make
 import GHC.Core.Type
 import GHC.Core.InstEnv     ( DFunInstType )
 import GHC.Core.Class
@@ -34,6 +33,7 @@ import GHC.Core.Predicate
 import GHC.Core.Multiplicity ( scaledThing )
 import GHC.Core.Unify ( ruleMatchTyKiX )
 
+import GHC.Types.TyThing( lookupDataCon, lookupId )
 import GHC.Types.Name
 import GHC.Types.Name.Set
 import GHC.Types.Var
@@ -41,6 +41,8 @@ import GHC.Types.Id( mkTemplateLocals )
 import GHC.Types.Var.Set
 import GHC.Types.SrcLoc
 import GHC.Types.Var.Env
+
+import GHC.Builtin.Names( srcLocDataConName, pushCallStackName )
 
 import GHC.Utils.Monad ( concatMapM, foldlM )
 import GHC.Utils.Outputable
@@ -50,6 +52,7 @@ import GHC.Utils.Misc
 import GHC.Unit.Module
 
 import GHC.Data.Bag
+import GHC.Data.FastString( FastString )
 
 import GHC.Driver.DynFlags
 
@@ -138,31 +141,16 @@ canDictCt ev cls tys
          -- doNotExpand: We have already expanded superclasses for /this/ dict
          -- so set the fuel to doNotExpand to avoid repeating expansion
 
-  | CtWanted { ctev_rewriters = rewriters } <- ev
+  | isWanted ev
   , Just ip_name <- isCallStackPred cls tys
-  , isPushCallStackOrigin orig
+  , isPushCallStackOrigin (ctEvOrigin ev)
   -- If we're given a CallStack constraint that arose from a function
   -- call, we need to push the current call-site onto the stack instead
   -- of solving it directly from a given.
   -- See Note [Overview of implicit CallStacks] in GHC.Tc.Types.Evidence
   -- and Note [Solving CallStack constraints] in GHC.Tc.Solver.Types
   = Stage $
-    do { -- First we emit a new constraint that will capture the
-         -- given CallStack.
-         let new_loc = setCtLocOrigin loc (IPOccOrigin (HsIPName ip_name))
-                            -- We change the origin to IPOccOrigin so
-                            -- this rule does not fire again.
-                            -- See Note [Overview of implicit CallStacks]
-                            -- in GHC.Tc.Types.Evidence
-
-       ; new_ev <- newWantedEvVarNC new_loc rewriters pred
-
-         -- Then we solve the wanted by pushing the call-site
-         -- onto the newly emitted CallStack
-       ; let ev_cs = EvCsPushCall (callStackOriginFS orig)
-                                  (ctLocSpan loc) (ctEvExpr new_ev)
-       ; solveCallStack ev ev_cs
-
+    do { new_ev <- solveCallStack ip_name ev
        ; continueWith (DictCt { di_ev = new_ev, di_cls = cls
                               , di_tys = tys, di_pend_sc = doNotExpand }) }
          -- doNotExpand: No superclasses for class CallStack
@@ -176,20 +164,67 @@ canDictCt ev cls tys
                   -- See Invariants in `CCDictCan.cc_pend_sc`
        ; continueWith (DictCt { di_ev = ev, di_cls = cls
                               , di_tys = tys, di_pend_sc = fuel }) }
+
+
+{- *********************************************************************
+*                                                                      *
+*           Implicit parameters and call stacks
+*                                                                      *
+********************************************************************* -}
+
+solveCallStack :: FastString -> CtEvidence -> TcS CtEvidence
+-- See Note [Overview of implicit CallStacks] in GHC.Tc.Types.Evidence
+solveCallStack ip_name ev@(CtWanted { ctev_rewriters = rewriters })
+  -- We're given ev_cs :: CallStack, but the evidence term should be a
+  -- dictionary, so we have to coerce ev_cs to a dictionary for
+  -- `IP ip CallStack`. See Note [Overview of implicit CallStacks]
+  = do { df <- getDynFlags
+
+       ; -- First we emit a new constraint that will capture the
+         -- given CallStack.
+         let new_loc = setCtLocOrigin loc (IPOccOrigin (HsIPName ip_name))
+                            -- We change the origin to IPOccOrigin so
+                            -- this rule does not fire again.
+                            -- See Note [Overview of implicit CallStacks]
+                            -- in GHC.Tc.Types.Evidence
+
+       ; outer_ev <- newWantedEvVarNC new_loc rewriters pred
+
+         -- Then we solve the wanted by pushing the call-site
+         -- onto the newly emitted CallStack
+       ; let fs   = callStackOriginFS orig
+             span = ctLocSpan loc
+             platform = targetPlatform df
+       ; m             <- getModule
+       ; srcLocDataCon <- lookupDataCon srcLocDataConName
+       ; push_cs_id    <- lookupId pushCallStackName
+       ; name_expr     <- mkStringExprFS fs
+       ; loc_expr <- mkCoreConApps srcLocDataCon <$>
+                     sequence [ mkStringExprFS (unitFS $ moduleUnit m)
+                              , mkStringExprFS (moduleNameFS $ moduleName m)
+                              , mkStringExprFS (srcSpanFile span)
+                              , return $ mkIntExprInt platform (srcSpanStartLine span)
+                              , return $ mkIntExprInt platform (srcSpanStartCol span)
+                              , return $ mkIntExprInt platform (srcSpanEndLine span)
+                              , return $ mkIntExprInt platform (srcSpanEndCol span) ]
+
+       -- At this point outer_ev :: IP sym CallStack
+       -- but we need the actual CallStack to pass to
+       --     pushCallStack :: (String,SrcLoc) -> CallStack -> CallStack
+       -- See Note [Overview of implicit CallStacks]
+       ; let outer_stk, inner_stk :: EvExpr   -- Both of type CallStack
+             outer_stk = evUnwrapIP pred (ctEvExpr outer_ev)
+             inner_stk = mkCoreApps (Var push_cs_id) [mkCoreTup [name_expr, loc_expr], outer_stk]
+
+       ; setEvBindIfWanted ev True (EvExpr (evWrapIP pred inner_stk))
+       ; return outer_ev }
   where
     loc  = ctEvLoc ev
     orig = ctLocOrigin loc
     pred = ctEvPred ev
 
-solveCallStack :: CtEvidence -> EvCallStack -> TcS ()
--- Also called from GHC.Tc.Solver when defaulting call stacks
-solveCallStack ev ev_cs
-  -- We're given ev_cs :: CallStack, but the evidence term should be a
-  -- dictionary, so we have to coerce ev_cs to a dictionary for
-  -- `IP ip CallStack`. See Note [Overview of implicit CallStacks]
-  = do { cs_tm <- evCallStack ev_cs
-       ; let ev_tm = mkEvCast cs_tm (wrapIP (ctEvPred ev))
-       ; setEvBindIfWanted ev True ev_tm }
+solveCallStack _ ev@(CtGiven {}) = pprPanic "solveCallStack" (ppr ev)
+  -- Caller only uses solveCallStack for Wanted constraints
 
 
 {- Note [Shadowing of implicit parameters]
