@@ -156,7 +156,8 @@ synonymTyConsOfType ty
 
      go_prov (PhantomProv co)     = go_co co
      go_prov (ProofIrrelProv co)  = go_co co
-     go_prov (PluginProv _ _)     = emptyNameEnv
+     go_prov (PluginProv {})      = emptyNameEnv
+     go_prov (UnaryClassProv {})  = emptyNameEnv
 
      go_tc tc | isTypeSynonymTyCon tc = unitNameEnv (tyConName tc) tc
               | otherwise             = emptyNameEnv

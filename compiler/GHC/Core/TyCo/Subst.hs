@@ -904,6 +904,7 @@ subst_co subst co
     go_prov (PhantomProv kco)    = PhantomProv (go kco)
     go_prov (ProofIrrelProv kco) = ProofIrrelProv (go kco)
     go_prov (PluginProv s cvs)   = PluginProv s $ substDCoVarSet subst cvs
+    go_prov p@UnaryClassProv     = p
 
     -- See Note [Substituting in a coercion hole]
     go_hole h@(CoercionHole { ch_co_var = cv })

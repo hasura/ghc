@@ -500,8 +500,8 @@ data IfaceUnivCoProv
   | IfacePluginProv String [IfLclName] [Var]
     -- ^ Local covars and open (free) covars resp
     -- See Note [Free TyVars and CoVars in IfaceType]
+  | IfaceUnaryClassProv
   deriving (Eq, Ord)
-
 
 {- Note [Holes in IfaceCoercion]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -720,9 +720,10 @@ substIfaceType env ty
 
     go_cos = map go_co
 
-    go_prov (IfacePhantomProv co)    = IfacePhantomProv (go_co co)
-    go_prov (IfaceProofIrrelProv co) = IfaceProofIrrelProv (go_co co)
-    go_prov co@(IfacePluginProv _ _ _) = co
+    go_prov (IfacePhantomProv co)       = IfacePhantomProv (go_co co)
+    go_prov (IfaceProofIrrelProv co)    = IfaceProofIrrelProv (go_co co)
+    go_prov co@(IfacePluginProv {})     = co
+    go_prov co@(IfaceUnaryClassProv {}) = co
 
 substIfaceAppArgs :: IfaceTySubst -> IfaceAppArgs -> IfaceAppArgs
 substIfaceAppArgs env args
@@ -2064,6 +2065,8 @@ pprIfaceUnivCoProv (IfaceProofIrrelProv co)
   = text "irrel" <+> pprParendIfaceCoercion co
 pprIfaceUnivCoProv (IfacePluginProv s cvs fcvs)
   = hang (text "plugin") 2 (sep [doubleQuotes (text s), ppr cvs, ppr fcvs])
+pprIfaceUnivCoProv IfaceUnaryClassProv
+  = text "unary-class"
 
 -------------------
 instance Outputable IfLclName where
@@ -2504,6 +2507,7 @@ instance Binary IfaceUnivCoProv where
           -- See Note [Free TyVars and CoVars in IfaceType]
           assertPpr (null fcvs) (ppr cvs $$ ppr fcvs) $
             put_ bh cvs
+  put_ bh IfaceUnaryClassProv = putByte bh 4
 
   get bh = do
       tag <- getByte bh
@@ -2515,6 +2519,7 @@ instance Binary IfaceUnivCoProv where
            3 -> do a <- get bh
                    cvs <- get bh
                    return $ IfacePluginProv a cvs []
+           4 -> return IfaceUnaryClassProv
            _ -> panic ("get IfaceUnivCoProv " ++ show tag)
 
 

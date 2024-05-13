@@ -2535,6 +2535,8 @@ lintCoercion co@(UnivCo prov r ty1 ty2)
                -- they don't matter to Lint
              ; return (PluginProv s cvs) }
 
+     lint_prov _ _ prov@UnaryClassProv = return prov
+
      check_kinds kco k1 k2
        = do { let Pair k1' k2' = coercionKind kco
             ; ensureEqTys k1 k1' (mkBadUnivCoMsg CLeft  co)

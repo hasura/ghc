@@ -1544,12 +1544,14 @@ data UnivCoProvenance
       --   that the the proof represented by the coercion makes use of.
       --   See Note [The importance of tracking free coercion variables].
 
+  | UnaryClassProv
   deriving Data.Data
 
 instance Outputable UnivCoProvenance where
   ppr (PhantomProv _)      = text "(phantom)"
   ppr (ProofIrrelProv _)   = text "(proof irrel.)"
   ppr (PluginProv str cvs) = parens (text "plugin" <+> brackets (text str) <+> ppr cvs)
+  ppr UnaryClassProv       = text "(unary-class)"
 
 -- | A coercion to be filled in by the type-checker. See Note [Coercion holes]
 data CoercionHole
@@ -1945,6 +1947,7 @@ foldTyCo (TyCoFolder { tcf_view       = view
     go_prov env (PhantomProv co)    = go_co env co
     go_prov env (ProofIrrelProv co) = go_co env co
     go_prov _   (PluginProv _ cvs)  = go_cvs env cvs
+    go_prov _   (UnaryClassProv {}) = mempty
 
     -- See Note [Use explicit recursion in foldTyCo]
     go_cvs env cvs = foldr (add_one env) mempty (dVarSetElems cvs)
@@ -2014,7 +2017,8 @@ coercionSize (AxiomRuleCo _ cs)  = 1 + sum (map coercionSize cs)
 provSize :: UnivCoProvenance -> Int
 provSize (PhantomProv co)    = 1 + coercionSize co
 provSize (ProofIrrelProv co) = 1 + coercionSize co
-provSize (PluginProv _ _)    = 1
+provSize (PluginProv {})     = 1
+provSize (UnaryClassProv {}) = 1
 
 {-
 ************************************************************************

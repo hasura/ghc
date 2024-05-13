@@ -577,9 +577,10 @@ expandTypeSynonyms ty
     go_co _ (HoleCo h)
       = pprPanic "expandTypeSynonyms hit a hole" (ppr h)
 
-    go_prov subst (PhantomProv co)    = PhantomProv (go_co subst co)
-    go_prov subst (ProofIrrelProv co) = ProofIrrelProv (go_co subst co)
-    go_prov _     p@(PluginProv _ _)  = p
+    go_prov subst (PhantomProv co)      = PhantomProv (go_co subst co)
+    go_prov subst (ProofIrrelProv co)   = ProofIrrelProv (go_co subst co)
+    go_prov _     p@(PluginProv {})     = p
+    go_prov _     p@(UnaryClassProv {}) = p
 
       -- the "False" and "const" are to accommodate the type of
       -- substForAllCoBndrUsing, which is general enough to
@@ -1003,6 +1004,7 @@ mapTyCoX (TyCoMapper { tcm_tyvar = tyvar
     go_prov !env (PhantomProv co)    = PhantomProv <$> go_co env co
     go_prov !env (ProofIrrelProv co) = ProofIrrelProv <$> go_co env co
     go_prov !env (PluginProv s cvs)  = PluginProv s <$> go_fcvs env (dVarSetElems cvs)
+    go_prov !_   p@UnaryClassProv    = return p
 
     -- See Note [Use explicit recursion in mapTyCo]
     go_fcvs :: env -> [CoVar] -> m DTyCoVarSet
@@ -2490,7 +2492,7 @@ isTerminatingType :: HasDebugCallStack => Type -> Bool
 -- NB: unlifted types are not terminating types!
 --     e.g. you can write a term (loop 1)::Int# that diverges.
 isTerminatingType ty = case tyConAppTyCon_maybe ty of
-    Just tc -> isClassTyCon tc && not (isNewTyCon tc)
+    Just tc -> isClassTyCon tc && not (isUnaryClassTyCon tc)
     _       -> False
 
 -- | Does this type classify a core (unlifted) Coercion?

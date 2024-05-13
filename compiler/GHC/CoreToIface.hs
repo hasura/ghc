@@ -321,6 +321,7 @@ toIfaceCoercionX fr co
     go_prov :: UnivCoProvenance -> IfaceUnivCoProv
     go_prov (PhantomProv co)     = IfacePhantomProv (go co)
     go_prov (ProofIrrelProv co)  = IfaceProofIrrelProv (go co)
+    go_prov UnaryClassProv       = IfaceUnaryClassProv
     go_prov (PluginProv str cvs) = IfacePluginProv str (map toIfaceCoVar bound_cvs) free_cvs
       where
         (free_cvs, bound_cvs) = partition (`elemVarSet` fr) (dVarSetElems cvs)

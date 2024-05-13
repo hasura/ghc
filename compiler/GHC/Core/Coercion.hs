@@ -1463,6 +1463,7 @@ setNominalRole_maybe r co
       | case prov of PhantomProv {}    -> False  -- should always be phantom
                      ProofIrrelProv {} -> True   -- it's always safe
                      PluginProv {}     -> False  -- who knows? This choice is conservative.
+                     UnaryClassProv {} -> False  -- who knows? This choice is conservative.
       = Just $ UnivCo prov Nominal co1 co2
     setNominalRole_maybe_helper _ = Nothing
 
@@ -1587,7 +1588,8 @@ promoteCoercion co = case co of
 
     UnivCo (PhantomProv kco)    _ _ _ -> kco
     UnivCo (ProofIrrelProv kco) _ _ _ -> kco
-    UnivCo (PluginProv _ _)     _ _ _ -> mkKindCo co
+    UnivCo (PluginProv {})      _ _ _ -> mkKindCo co
+    UnivCo UnaryClassProv       _ _ _ -> mkKindCo co
 
     SymCo g
       -> mkSymCo (promoteCoercion g)
@@ -2423,6 +2425,7 @@ seqProv :: UnivCoProvenance -> ()
 seqProv (PhantomProv co)    = seqCo co
 seqProv (ProofIrrelProv co) = seqCo co
 seqProv (PluginProv _ cvs)  = seqDVarSet cvs
+seqProv UnaryClassProv      = ()
 
 seqCos :: [Coercion] -> ()
 seqCos []       = ()

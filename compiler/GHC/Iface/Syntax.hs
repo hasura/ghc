@@ -1806,7 +1806,8 @@ freeNamesIfCoercion (IfaceAxiomRuleCo _ax cos)
 freeNamesIfProv :: IfaceUnivCoProv -> NameSet
 freeNamesIfProv (IfacePhantomProv co)    = freeNamesIfCoercion co
 freeNamesIfProv (IfaceProofIrrelProv co) = freeNamesIfCoercion co
-freeNamesIfProv (IfacePluginProv _ _ _)  = emptyNameSet
+freeNamesIfProv (IfacePluginProv {})     = emptyNameSet
+freeNamesIfProv (IfaceUnaryClassProv {}) = emptyNameSet
 
 freeNamesIfVarBndr :: VarBndr IfaceBndr vis -> NameSet
 freeNamesIfVarBndr (Bndr bndr _) = freeNamesIfBndr bndr
