@@ -637,6 +637,7 @@ opt_univ env sym prov role oty1 oty2
     prov' = case prov of
       ProofIrrelProv kco -> ProofIrrelProv $ opt_co4_wrap env sym False Nominal kco
       PluginProv s cvs   -> PluginProv s $ substDCoVarSet (liftingContextSubst env) cvs
+      UnaryClassProv {}  -> prov
 
 -------------
 opt_transList :: HasDebugCallStack => InScopeSet -> [NormalCo] -> [NormalCo] -> [NormalCo]
