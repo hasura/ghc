@@ -225,7 +225,7 @@ mkModuleInit cost_centre_info this_mod hpc_info
 cgTyCon :: TyCon -> FCode ()
 -- Generate static data for each algebraic data type
 cgTyCon tycon
-  | not (isDataTyCon tycon)  -- Type families, newtypes, and `type data` constructors
+  | not (isBoxedDataTyCon tycon)  -- Type families, newtypes, and `type data` constructors
   = return ()
 
   | otherwise   -- An honest-to-goodness algebraic data type
