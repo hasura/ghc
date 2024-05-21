@@ -1845,7 +1845,7 @@ error = true;
                     break;
 
                 case 'H':
-                    OPTION_SAFE;
+                    OPTION_UNSAFE;
                     RtsFlags.GcFlags.hugepages = true;
                     break;
 
