@@ -193,12 +193,11 @@ checkRecSel :: PmRecSel () -> CheckAction (PmRecSel Id)
 -- See Note [Detecting incomplete record selectors] in GHC.HsToCore.Pmc
 checkRecSel pr@(PmRecSel { pr_arg = arg, pr_cons = cons }) = CA $ \inc -> do
   arg_id <- case arg of
-           Var arg_id -> return arg_id
-           _ -> mkPmId $ exprType arg
+    (Var arg_id) -> return arg_id
+    arg -> mkPmId $ exprType arg
 
   let con_cts = map (PhiNotConCt arg_id . PmAltConLike) cons
-      arg_ct  = PhiCoreCt arg_id arg
-      phi_cts = listToBag (arg_ct : con_cts)
+      phi_cts = listToBag (PhiCoreCt arg_id arg : con_cts)
   unc <- addPhiCtsNablas inc phi_cts
   pure CheckResult { cr_ret = pr{ pr_arg_var = arg_id }, cr_uncov = unc, cr_approx = mempty }
 

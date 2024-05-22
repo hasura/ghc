@@ -330,9 +330,17 @@ tcApp rn_expr exp_res_ty
 
        ; (tc_fun, fun_sigma) <- tcInferAppHead fun
 
+       ; let supp_incomplete_rec_sel
+               | XExpr (ExpandedThingRn (OrigExpr HsGetField{}) _) <- rn_expr
+               -- See (7) of Note [Detecting incomplete record selectors]
+               = setSuppressIncompleteRecSelsTc True
+               | otherwise
+               = id
+
        -- Instantiate
        ; do_ql <- wantQuickLook rn_fun
-       ; (delta, inst_args, app_res_rho) <- tcInstFun do_ql True (tc_fun, fun_ctxt) fun_sigma rn_args
+       ; (delta, inst_args, app_res_rho) <- supp_incomplete_rec_sel $
+           tcInstFun do_ql True (tc_fun, fun_ctxt) fun_sigma rn_args
 
        -- Quick look at result
        ; app_res_rho <- if do_ql
@@ -654,7 +662,9 @@ tcInstFun do_ql inst_final (tc_fun, fun_ctxt) fun_sigma rn_args
             ; return (delta, reverse acc, fun_ty) }
 
     go1 delta acc so_far fun_ty (EWrap w : args)
-      = go1 delta (EWrap w : acc) so_far fun_ty args
+      = setSuppressIncompleteRecSelsTc False $
+        -- See (7) of Note [Detecting incomplete record selectors]
+        go1 delta (EWrap w : acc) so_far fun_ty args
 
     go1 delta acc so_far fun_ty (EPrag sp prag : args)
       = go1 delta (EPrag sp prag : acc) so_far fun_ty args
