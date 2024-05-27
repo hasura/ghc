@@ -180,7 +180,7 @@ infix 4 ==
 -- | A type family to compute Boolean equality.
 type (==) :: k -> k -> Bool
 type family a == b where
-  f a == g b = f == g && a == b
+  f (a :: k) == g (b :: k) = f == g && a == b
   a == a = 'True
   _ == _ = 'False
 

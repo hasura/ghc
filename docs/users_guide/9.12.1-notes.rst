@@ -35,6 +35,25 @@ Language
 - UnliftedFFITypes: GHC will now accept ffi types like: ``(# #) -> T`` where ``(# #)``
   is used as the one and only function argument.
 
+- As part of `GHC proposal #425
+  <https://github.com/ghc-proposals/ghc-proposals/blob/master/proposals/0425-decl-invis-binders.rst>`_,
+  the instantiation of arguments to type and data instances is now fully determined by the left-hand side.
+  In particular, this means result kinds must be specified explictly: Instead of
+  
+  ::
+    
+    type family F a :: k
+    type instance F Int = Char
+    type instance F Int = Maybe
+
+  you must now write
+  
+  ::
+    
+    type family F a :: k
+    type instance F @Type Int = Char
+    type instance F @(Type -> Type) Int = Maybe
+
 Compiler
 ~~~~~~~~
 

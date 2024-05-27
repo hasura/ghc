@@ -3330,7 +3330,7 @@ tcTyFamInstEqnGuts :: TyCon -> AssocInstInfo
                    -> HsOuterFamEqnTyVarBndrs GhcRn     -- Implicit and explicit binders
                    -> HsFamEqnPats GhcRn                -- Patterns
                    -> LHsType GhcRn                     -- RHS
-                   -> TcM ([TyVar], TyVarSet, [TcType], TcType)
+                   -> TcM ([TyVar], TyVarSet, [Type], Type)
                        -- (tyvars, non_user_tvs, pats, rhs)
 -- Used only for type families, not data families
 tcTyFamInstEqnGuts fam_tc mb_clsinfo outer_hs_bndrs hs_pats hs_rhs_ty
@@ -3342,15 +3342,14 @@ tcTyFamInstEqnGuts fam_tc mb_clsinfo outer_hs_bndrs hs_pats hs_rhs_ty
 
        -- This code is closely related to the code
        -- in GHC.Tc.Gen.HsType.kcCheckDeclHeader_cusk
-       ; (tclvl, wanted, (outer_bndrs, (lhs_ty, rhs_ty)))
+       ; (tclvl, wanted, (outer_bndrs, (lhs_ty, rhs_kind)))
                <- pushLevelAndSolveEqualitiesX "tcTyFamInstEqnGuts" $
                   bindOuterFamEqnTKBndrs skol_info outer_hs_bndrs   $
                   do { (lhs_ty, rhs_kind) <- tcFamTyPats fam_tc hs_pats
                        -- Ensure that the instance is consistent with its
                        -- parent class (#16008)
                      ; addConsistencyConstraints mb_clsinfo lhs_ty
-                     ; rhs_ty <- tcCheckLHsTypeInContext hs_rhs_ty (TheKind rhs_kind)
-                     ; return (lhs_ty, rhs_ty) }
+                     ; return (lhs_ty, rhs_kind) }
 
        ; outer_bndrs <- scopedSortOuter outer_bndrs
        ; let outer_tvs = outerTyVars outer_bndrs
@@ -3377,25 +3376,35 @@ tcTyFamInstEqnGuts fam_tc mb_clsinfo outer_hs_bndrs hs_pats hs_rhs_ty
               , text "lhs_ty:"    <+> ppr lhs_ty
               , text "final_tvs:" <+> pprTyVars final_tvs ]
 
-       -- See Note [Error on unconstrained meta-variables] in GHC.Tc.Utils.TcMType
-       -- Example: typecheck/should_fail/T17301
-       ; dvs_rhs <- candidateQTyVarsOfType rhs_ty
-       ; let err_ctx tidy_env
-               = do { (tidy_env2, rhs_ty) <- zonkTidyTcType tidy_env rhs_ty
-                    ; return (tidy_env2, UninfTyCtx_TyFamRhs rhs_ty) }
-       ; doNotQuantifyTyVars dvs_rhs err_ctx
+       ; (tclvl_rhs, wanted_rhs, rhs_ty) <-
+                pushLevelAndSolveEqualitiesX "tcTyFamInstEqnGuts" $
+                tcExtendTyVarEnv final_tvs $
+                tcCheckLHsType hs_rhs_ty rhs_kind
 
-       ; (final_tvs, non_user_tvs, lhs_ty, rhs_ty) <- initZonkEnv NoFlexi $
+      ; reportUnsolvedEqualities skol_info final_tvs tclvl_rhs wanted_rhs
+
+      ; (final_tvs, non_user_tvs, lhs_ty) <- initZonkEnv NoFlexi $
          runZonkBndrT (zonkTyBndrsX final_tvs) $ \ final_tvs ->
            do { lhs_ty       <- zonkTcTypeToTypeX lhs_ty
-              ; rhs_ty       <- zonkTcTypeToTypeX rhs_ty
               ; non_user_tvs <- traverse lookupTyVarX qtvs
-              ; return (final_tvs, non_user_tvs, lhs_ty, rhs_ty) }
+              ; return (final_tvs, non_user_tvs, lhs_ty) }
 
        ; let pats = unravelFamInstPats lhs_ty
              -- Note that we do this after solveEqualities
              -- so that any strange coercions inside lhs_ty
              -- have been solved before we attempt to unravel it
+
+       -- See Note [Error on unconstrained meta-variables] in GHC.Tc.Utils.TcMType
+       -- Example: typecheck/should_fail/T17301
+       ; dvs_rhs <- candidateQTyVarsOfType rhs_kind
+       ; let err_ctx tidy_env
+               = do { (tidy_env2, rhs_ty) <- zonkTidyTcType tidy_env rhs_kind
+                    ; return (tidy_env2, UninfTyCtx_TyFamRhs rhs_ty) }
+       ; doNotQuantifyTyVars dvs_rhs err_ctx
+
+       ; rhs_ty <- initZonkEnv NoFlexi $
+         runZonkBndrT (zonkTyBndrsX final_tvs) $ \_ ->
+           zonkTcTypeToTypeX rhs_ty
 
        ; traceTc "tcTyFamInstEqnGuts }" (vcat [ ppr fam_tc, pprTyVars final_tvs ])
                  -- Don't try to print 'pats' here, because lhs_ty involves
