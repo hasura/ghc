@@ -81,6 +81,8 @@ flag thread-sanitizer
     mechanism supported by GCC and Clang. See Note [ThreadSanitizer]
     in @rts/include/rts/TSANUtils.h@.
   default: False
+flag ubsan
+  default: False
 
 library
     -- rts is a wired in package and
@@ -184,6 +186,10 @@ library
       if flag(thread-sanitizer)
         cc-options: -fsanitize=thread
         ld-options: -fsanitize=thread
+
+      if flag(ubsan)
+        cc-options: -fsanitize=undefined -fno-sanitize=function -fno-sanitize=integer
+        ld-options: -fsanitize=undefined -fno-sanitize=function -fno-sanitize=integer
 
       if os(linux)
          -- the RTS depends upon libc. while this dependency is generally

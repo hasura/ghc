@@ -7,6 +7,7 @@ module Flavour
   , addArgs
   , splitSections
   , enableThreadSanitizer
+  , enableUBSan
   , enableDebugInfo, enableTickyGhc
   , viaLlvmBackend
   , enableProfiledGhc
@@ -48,6 +49,7 @@ flavourTransformers = M.fromList
     , "no_split_sections" =: noSplitSections
     , "thread_sanitizer" =: enableThreadSanitizer False
     , "thread_sanitizer_cmm" =: enableThreadSanitizer True
+    , "ubsan"            =: enableUBSan
     , "llvm"             =: viaLlvmBackend
     , "profiled_ghc"     =: enableProfiledGhc
     , "no_dynamic_ghc"   =: disableDynamicGhcPrograms
@@ -232,6 +234,25 @@ enableThreadSanitizer instrumentCmm = addArgs $ notStage0 ? mconcat
         | pkg <- [base, ghcPrim, array, rts]
         ]
     ]
+
+enableUBSan :: Flavour -> Flavour
+enableUBSan =
+  addArgs $
+    notStage0
+      ? mconcat
+        [ package rts ? builder (Cabal Flags) ? arg "ubsan",
+          builder (Ghc CompileCWithGhc)
+            ? mconcat [arg ("-optc" <> _arg) | _arg <- ubsan_args],
+          builder (Ghc CompileCppWithGhc)
+            ? mconcat [arg ("-optcxx" <> _arg) | _arg <- ubsan_args],
+          builder (Ghc LinkHs)
+            ? mconcat
+              [arg ("-optc" <> _arg) <> arg ("-optl" <> _arg) | _arg <- ubsan_args],
+          builder (Cc CompileC) ? mconcat [arg _arg | _arg <- ubsan_args]
+        ]
+  where
+    ubsan_args =
+      ["-fsanitize=undefined", "-fno-sanitize=function", "-fno-sanitize=integer"]
 
 -- | Use the LLVM backend in stages 1 and later.
 viaLlvmBackend :: Flavour -> Flavour

@@ -304,6 +304,7 @@ static StgWord app_ptrs_itbl[] = {
 HsStablePtr rts_breakpoint_io_action; // points to the IO action which is executed on a breakpoint
                                       // it is set in ghci/GHCi/Run.hs:withBreakAction
 
+__attribute__((no_sanitize("undefined")))
 Capability *
 interpretBCO (Capability* cap)
 {
