@@ -2176,8 +2176,8 @@ alignmentFromTypes :: CmmType  -- ^ element type
                    -> CmmType  -- ^ index type
                    -> AlignmentSpec
 alignmentFromTypes ty idx_ty
-  | typeWidth ty < typeWidth idx_ty = NaturallyAligned
-  | otherwise                       = Unaligned
+  | typeWidth ty <= typeWidth idx_ty = NaturallyAligned
+  | otherwise                        = Unaligned
 
 doIndexOffAddrOp :: Maybe MachOp
                  -> CmmType
