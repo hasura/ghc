@@ -461,7 +461,7 @@ data PsMessage
 
    | PsErrInvalidPun !PsErrPunDetails
 
-   | PsErrSpecEpxrMultipleTypeAscription
+   | PsErrSpecExprMultipleTypeAscription
 
    deriving Generic
 
