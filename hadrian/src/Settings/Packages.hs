@@ -482,7 +482,7 @@ rtsPackageArgs = package rts ? do
 speedHack :: Action Bool
 speedHack = do
     i386   <- anyTargetArch [ArchX86]
-    goodOS <- not <$> anyTargetOs [OSDarwin, OSSolaris2]
+    goodOS <- not <$> anyTargetOs [OSSolaris2]
     return $ i386 && goodOS
 
 -- See @rts/ghc.mk@.
