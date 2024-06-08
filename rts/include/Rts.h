@@ -54,11 +54,7 @@ extern "C" {
 #include "rts/Types.h"
 #include "rts/Time.h"
 
-#if __GNUC__ >= 3
 #define ATTRIBUTE_ALIGNED(n) __attribute__((aligned(n)))
-#else
-#define ATTRIBUTE_ALIGNED(n) /*nothing*/
-#endif
 
 // Symbols that are extern, but private to the RTS, are declared
 // with visibility "hidden" to hide them outside the RTS shared
@@ -69,24 +65,11 @@ extern "C" {
 #define RTS_PRIVATE  /* disabled: RTS_PRIVATE */
 #endif
 
-#if __GNUC__ >= 4
 #define RTS_UNLIKELY(p) __builtin_expect((p),0)
-#else
-#define RTS_UNLIKELY(p) (p)
-#endif
 
-#if __GNUC__ >= 4
 #define RTS_LIKELY(p) __builtin_expect(!!(p), 1)
-#else
-#define RTS_LIKELY(p) (p)
-#endif
 
-/* __builtin_unreachable is supported since GNU C 4.5 */
-#if __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 5)
 #define RTS_UNREACHABLE __builtin_unreachable()
-#else
-#define RTS_UNREACHABLE abort()
-#endif
 
 /* Prefetch primitives */
 #define prefetchForRead(ptr) __builtin_prefetch(ptr, 0)
@@ -377,17 +360,8 @@ TICK_VAR(2)
    Useful macros and inline functions
    -------------------------------------------------------------------------- */
 
-#if defined(__GNUC__)
-#define SUPPORTS_TYPEOF
-#endif
-
-#if defined(SUPPORTS_TYPEOF)
 #define stg_min(a,b) ({typeof(a) _a = (a), _b = (b); _a <= _b ? _a : _b; })
 #define stg_max(a,b) ({typeof(a) _a = (a), _b = (b); _a <= _b ? _b : _a; })
-#else
-#define stg_min(a,b) ((a) <= (b) ? (a) : (b))
-#define stg_max(a,b) ((a) <= (b) ? (b) : (a))
-#endif
 
 /* -------------------------------------------------------------------------- */
 
