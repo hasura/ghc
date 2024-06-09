@@ -94,7 +94,7 @@ module Prelude (
              sum),      -- :: Num a => t a -> a
              -- toList) -- :: Foldable t => t a -> [a]
 
-    Traversable(traverse, sequenceA, mapM, sequence),
+    Traversable(traverse, sequenceA, mapM, sequence), for,
 
     -- ** Miscellaneous functions
     id, const, (.), flip, ($), until,
@@ -173,7 +173,7 @@ import GHC.Internal.Data.Foldable    ( Foldable(..) )
 import qualified GHC.Internal.Data.Foldable as Foldable
 import GHC.Internal.Data.Functor     ( (<$>) )
 import GHC.Internal.Data.Maybe
-import GHC.Internal.Data.Traversable ( Traversable(..) )
+import GHC.Internal.Data.Traversable ( Traversable(..), for )
 import GHC.Internal.Data.Tuple
 
 import GHC.Internal.Base hiding ( foldr, mapM, sequence )
