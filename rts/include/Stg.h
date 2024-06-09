@@ -128,20 +128,13 @@
 #  define EXTERN_INLINE static inline
 # endif
 
-/*
- * GCC attributes
- */
-#define GNU_ATTRIBUTE(at) __attribute__((at))
-
-#define GNUC3_ATTRIBUTE(at) __attribute__((at))
-
 /* Used to mark a switch case that falls-through */
 #if (defined(__GNUC__) && __GNUC__ >= 7)
 // N.B. Don't enable fallthrough annotations when compiling with Clang.
 // Apparently clang doesn't enable implicitly fallthrough warnings by default
 // http://llvm.org/viewvc/llvm-project?revision=167655&view=revision
 // when compiling C and the attribute cause warnings of their own (#16019).
-#define FALLTHROUGH GNU_ATTRIBUTE(fallthrough)
+#define FALLTHROUGH __attribute__((fallthrough))
 #else
 #define FALLTHROUGH ((void)0)
 #endif /* __GNUC__ >= 7 */
@@ -152,9 +145,9 @@
 #define GNUC_ATTR_HOT /* nothing */
 #endif
 
-#define STG_UNUSED    GNUC3_ATTRIBUTE(__unused__)
-#define STG_USED      GNUC3_ATTRIBUTE(__used__)
-#define STG_WARN_UNUSED_RESULT GNUC3_ATTRIBUTE(warn_unused_result)
+#define STG_UNUSED    __attribute__((__unused__))
+#define STG_USED      __attribute__((__used__))
+#define STG_WARN_UNUSED_RESULT __attribute__((warn_unused_result))
 
 /* Prevent functions from being optimized.
    See Note [Windows Stack allocations] */
@@ -164,13 +157,13 @@
 #define STG_NO_OPTIMIZE __attribute__((optimize("O0")))
 #endif
 
-#define STG_PRINTF_ATTR(fmt_arg, rest) GNUC3_ATTRIBUTE(format(printf, fmt_arg, rest))
+#define STG_PRINTF_ATTR(fmt_arg, rest) __attribute__((format(printf, fmt_arg, rest)))
 
 #define STG_RESTRICT __restrict__
 
-#define STG_NORETURN GNU_ATTRIBUTE(__noreturn__)
+#define STG_NORETURN __attribute__((__noreturn__))
 
-#define STG_MALLOC GNUC3_ATTRIBUTE(__malloc__)
+#define STG_MALLOC __attribute__((__malloc__))
 
 /* Instead of relying on GCC version checks to expand attributes,
  * use `__has_attribute` which is supported by GCC >= 5 and Clang. Hence, the
@@ -258,8 +251,8 @@ typedef StgFunPtr       F_;
 #define EB_(X)    extern const char X[]
 #define IB_(X)    static const char X[]
 /* static (non-heap) closures (requires alignment for pointer tagging): */
-#define EC_(X)    extern       StgWordArray (X) GNU_ATTRIBUTE(aligned (SIZEOF_VOID_P))
-#define IC_(X)    static       StgWordArray (X) GNU_ATTRIBUTE(aligned (SIZEOF_VOID_P))
+#define EC_(X)    extern       StgWordArray (X) __attribute__((aligned (SIZEOF_VOID_P)))
+#define IC_(X)    static       StgWordArray (X) __attribute__((aligned (SIZEOF_VOID_P)))
 /* writable data (does not require alignment): */
 #define ERW_(X)   extern       StgWordArray (X)
 #define IRW_(X)   static       StgWordArray (X)
@@ -267,7 +260,7 @@ typedef StgFunPtr       F_;
 #define ERO_(X)   extern const StgWordArray (X)
 #define IRO_(X)   static const StgWordArray (X)
 /* stg-native functions: */
-#define IF_(f)    static StgFunPtr GNUC3_ATTRIBUTE(used) f(void)
+#define IF_(f)    static StgFunPtr __attribute__((used)) f(void)
 #define FN_(f)           StgFunPtr f(void)
 #define EF_(f)           StgFunPtr f(void) /* External Cmm functions */
 /* foreign functions: */
