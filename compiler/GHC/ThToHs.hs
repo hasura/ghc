@@ -57,6 +57,7 @@ import Data.Bifunctor (first)
 import Data.Foldable (for_)
 import Data.List.NonEmpty( NonEmpty (..), nonEmpty )
 import qualified Data.List.NonEmpty as NE
+import qualified Data.Text as T
 import Data.Maybe( catMaybes, isNothing )
 import Data.Word (Word64)
 import GHC.Internal.TH.Syntax as TH
@@ -1159,7 +1160,7 @@ cvtl e = wrapLA (cvt e)
                               -- constructor names - see #14627.
                               { s' <- vcName s
                               ; wrapParLA (HsVar noExtField) s' }
-    cvt (LabelE s)       = return $ HsOverLabel NoSourceText (fsLit s)
+    cvt (LabelE s)       = return $ HsOverLabel NoSourceText (T.pack s)
     cvt (ImplicitParamVarE n) = do { n' <- ipName n; return $ HsIPVar noExtField n' }
     cvt (GetFieldE exp f) = do { e' <- cvtl exp
                                ; return $ HsGetField noExtField e'

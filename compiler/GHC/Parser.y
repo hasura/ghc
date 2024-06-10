@@ -98,6 +98,8 @@ import GHC.Builtin.Types ( unitTyCon, unitDataCon, sumTyCon,
 import Language.Haskell.Syntax.Basic (FieldLabelString(..))
 
 import qualified Data.Semigroup as Semi
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
 }
 
 %expect 0 -- shift/reduce conflicts
@@ -3613,7 +3615,7 @@ ipvar   :: { Located HsIPName }
 -----------------------------------------------------------------------------
 -- Overloaded labels
 
-overloaded_label :: { Located (SourceText, FastString) }
+overloaded_label :: { Located (SourceText, T.Text) }
         : LABELVARID          { sL1 $1 (getLABELVARIDs $1, getLABELVARID $1) }
 
 -----------------------------------------------------------------------------

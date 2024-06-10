@@ -21,6 +21,8 @@
 -- | Abstract Haskell syntax for expressions.
 module Language.Haskell.Syntax.Expr where
 
+import Data.Text (Text)
+
 import Language.Haskell.Syntax.Basic
 import Language.Haskell.Syntax.Decls
 import Language.Haskell.Syntax.Pat
@@ -283,7 +285,7 @@ data HsExpr p
                            -- See Note [Non-overloaded record field selectors] and
                            -- Note [Record selectors in the AST]
 
-  | HsOverLabel (XOverLabel p) FastString
+  | HsOverLabel (XOverLabel p) Text
      -- ^ Overloaded label (Note [Overloaded labels] in GHC.OverloadedLabels)
 
   | HsIPVar   (XIPVar p)

@@ -102,6 +102,10 @@ import qualified GHC.LanguageExtensions as LangExt
 -- bytestring
 import Data.ByteString (ByteString)
 
+-- text
+import Data.Text (Text)
+import qualified Data.Text as T
+
 -- containers
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -458,7 +462,7 @@ $unigraphic / { isSmartQuote } { smart_quote_error }
 }
 
 <0> {
-  "#" $idchar+ / { ifExtension OverloadedLabelsBit } { skip_one_varid_src ITlabelvarid }
+  "#" $idchar+ / { ifExtension OverloadedLabelsBit } { skip_one_varid_src_text ITlabelvarid }
   "#" \" / { ifExtension OverloadedLabelsBit } { lex_quoted_label }
 }
 
@@ -944,7 +948,7 @@ data Token
   | ITqconsym (FastString,FastString)
 
   | ITdupipvarid   FastString   -- GHC extension: implicit param: ?x
-  | ITlabelvarid SourceText FastString   -- Overloaded label: #x
+  | ITlabelvarid SourceText Text         -- Overloaded label: #x
                                          -- The SourceText is required because we can
                                          -- have a string literal as a label
                                          -- Note [Literal source text] in "GHC.Types.SourceText"
@@ -1220,6 +1224,11 @@ skip_one_varid_src :: (SourceText -> FastString -> Token) -> Action
 skip_one_varid_src f span buf len _buf2
   = return (L span $! f (SourceText $ lexemeToFastString (stepOn buf) (len-1))
                         (lexemeToFastString (stepOn buf) (len-1)))
+
+skip_one_varid_src_text :: (SourceText -> Text -> Token) -> Action
+skip_one_varid_src_text f span buf len _buf2
+  = return (L span $! f (SourceText $ lexemeToFastString (stepOn buf) (len-1))
+                        (lexemeToText (stepOn buf) (len-1)))
 
 skip_two_varid :: (FastString -> Token) -> Action
 skip_two_varid f span buf len _buf2
@@ -2198,7 +2207,7 @@ lex_quoted_label span buf _len _buf2 = do
   s <- lex_string_helper "" start
   (AI end bufEnd) <- getInput
   let
-    token = ITlabelvarid (SourceText src) (mkFastString s)
+    token = ITlabelvarid (SourceText src) (T.pack s)
     src = lexemeToFastString (stepOn buf) (cur bufEnd - cur buf - 1)
     start = psSpanStart span
 

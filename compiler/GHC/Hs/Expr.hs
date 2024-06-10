@@ -72,6 +72,7 @@ import qualified GHC.Internal.TH.Syntax as TH (Q)
 import Data.Data hiding (Fixity(..))
 import qualified Data.Data as Data (Fixity(..))
 import qualified Data.Kind
+import qualified Data.Text as T
 import Data.Maybe (isJust)
 import Data.Foldable ( toList )
 import Data.List.NonEmpty (NonEmpty)
@@ -645,9 +646,11 @@ ppr_expr (HsOverLabel s l) = char '#' <> case ghcPass @p of
                GhcPs -> helper s
                GhcRn -> helper s
                GhcTc -> dataConCantHappen s
-    where helper s =
+
+    where helper :: SourceText -> SDoc
+          helper s =
             char '#' <> case s of
-                          NoSourceText -> ppr l
+                          NoSourceText -> text (T.unpack l)
                           SourceText src -> ftext src
 ppr_expr (HsLit _ lit)       = ppr lit
 ppr_expr (HsOverLit _ lit)   = ppr lit
