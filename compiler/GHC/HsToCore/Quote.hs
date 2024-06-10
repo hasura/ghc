@@ -99,6 +99,7 @@ import Data.Function
 import Control.Monad.Trans.Reader
 import Control.Monad.Trans.Class
 import GHC.Types.Name.Reader (RdrName(..))
+import qualified Data.Text as T
 
 data MetaWrappers = MetaWrappers {
       -- Applies its argument to a type argument `m` and dictionary `Quote m`
@@ -1132,7 +1133,7 @@ rep_sccFun nm Nothing loc = do
 
 rep_sccFun nm (Just (L _ str)) loc = do
   nm1 <- lookupLOcc nm
-  str1 <- coreStringLit (sl_fs str)
+  str1 <- coreStringLit (mkFastStringText $ sl_fs str)
   scc <- repPragSCCFunNamed nm1 str1
   return [(loc, scc)]
 
@@ -1477,7 +1478,7 @@ repTyLit :: HsTyLit (GhcPass p) -> MetaM (Core (M TH.TyLit))
 repTyLit (HsNumTy _ i) = do
                          platform <- getPlatform
                          rep2 numTyLitName [mkIntegerExpr platform i]
-repTyLit (HsStrTy _ s) = do { s' <- mkStringExprFS s
+repTyLit (HsStrTy _ s) = do { s' <- mkStringExprFS (mkFastStringText s)
                             ; rep2 strTyLitName [s']
                             }
 repTyLit (HsCharTy _ c) = do { c' <- return (mkCharExpr c)
@@ -1909,7 +1910,7 @@ rep_implicit_param_bind (L loc (IPBind _ (L _ n) (L _ rhs)))
       ; return (locA loc, ipb) }
 
 rep_implicit_param_name :: HsIPName -> MetaM (Core String)
-rep_implicit_param_name (HsIPName name) = coreStringLit name
+rep_implicit_param_name (HsIPName name) = coreStringLit (mkFastStringText name)
 
 rep_val_binds :: HsValBinds GhcRn -> MetaM [(SrcSpan, Core (M TH.Dec))]
 -- Assumes: all the binders of the binding are already in the meta-env
@@ -3001,7 +3002,7 @@ mk_integer  i = return $ HsInteger NoSourceText i integerTy
 mk_rational :: FractionalLit -> MetaM (HsLit GhcRn)
 mk_rational r = do rat_ty <- lookupType rationalTyConName
                    return $ HsRat noExtField r rat_ty
-mk_string :: FastString -> MetaM (HsLit GhcRn)
+mk_string :: T.Text -> MetaM (HsLit GhcRn)
 mk_string s = return $ HsString NoSourceText s
 
 mk_char :: Char -> MetaM (HsLit GhcRn)

@@ -2031,7 +2031,7 @@ pprUntypedSplice True  n (HsUntypedSpliceExpr _ e) = ppr_splice (text "$") n e
 pprUntypedSplice False n (HsUntypedSpliceExpr _ e) = ppr_splice empty n e
 pprUntypedSplice _     _ (HsQuasiQuote _ q s)      = ppr_quasi q (unLoc s)
 
-ppr_quasi :: OutputableBndr p => p -> FastString -> SDoc
+ppr_quasi :: OutputableBndr p => p -> T.Text -> SDoc
 ppr_quasi quoter quote = char '[' <> ppr quoter <> vbar <>
                            ppr quote <> text "|]"
 
@@ -2411,6 +2411,7 @@ type instance Anno (FieldLabelStrings (GhcPass p)) = EpAnnCO
 type instance Anno FieldLabelString                = SrcSpanAnnN
 
 type instance Anno FastString                      = EpAnnCO
+type instance Anno T.Text                          = EpAnnCO
   -- Used in HsQuasiQuote and perhaps elsewhere
 
 type instance Anno (DotFieldOcc (GhcPass p))       = EpAnnCO

@@ -37,7 +37,6 @@ import Language.Haskell.Syntax.Extension
 import Language.Haskell.Syntax.Lit
 
 import qualified Data.Text as T
-import GHC.Data.FastString (unpackFS)
 
 {-
 ************************************************************************
@@ -223,7 +222,7 @@ instance OutputableBndrId p
 instance Outputable OverLitVal where
   ppr (HsIntegral i)     = pprWithSourceText (il_text i) (integer (il_value i))
   ppr (HsFractional f)   = ppr f
-  ppr (HsIsString st s)  = pprWithSourceText st (pprHsString (unpackFS s))
+  ppr (HsIsString st s)  = pprWithSourceText st (pprHsString (T.unpack s))
 
 -- | pmPprHsLit pretty prints literals and is used when pretty printing pattern
 -- match warnings. All are printed the same (i.e., without hashes if they are

@@ -136,7 +136,7 @@ parse dflags fpath bs = case unP (go False []) initState of
               L _ (ITstring _ file) <- tryP wrappedLexer
               L spF ITclose_prag <- tryP wrappedLexer
 
-              let newLoc = mkRealSrcLoc file (fromIntegral line - 1) (srcSpanEndCol spF)
+              let newLoc = mkRealSrcLoc (mkFastString file) (fromIntegral line - 1) (srcSpanEndCol spF)
               (bEnd'', _) <- lift getInput
               lift $ setInput (bEnd'', newLoc)
 

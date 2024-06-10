@@ -2744,8 +2744,8 @@ explicit_activation :: { ([AddEpAnn],Activation) }  -- In brackets
 quasiquote :: { Located (HsUntypedSplice GhcPs) }
         : TH_QUASIQUOTE   { let { loc = getLoc $1
                                 ; ITquasiQuote (quoter, quote, quoteSpan) = unLoc $1
-                                ; quoterId = mkUnqual varName quoter }
-                            in sL1 $1 (HsQuasiQuote noExtField quoterId (L (noAnnSrcSpan (mkSrcSpanPs quoteSpan)) quote)) }
+; quoterId = mkUnqual varName quoter }
+in sL1 $1 (HsQuasiQuote noExtField quoterId (L (noAnnSrcSpan (mkSrcSpanPs quoteSpan)) quote)) }
         | TH_QQUASIQUOTE  { let { loc = getLoc $1
                                 ; ITqQuasiQuote (qual, quoter, quote, quoteSpan) = unLoc $1
                                 ; quoterId = mkQual varName (qual, quoter) }
@@ -3982,7 +3982,7 @@ consym :: { LocatedN RdrName }
 literal :: { Located (HsLit GhcPs) }
         : CHAR              { sL1 $1 $ HsChar       (getCHARs $1) $ getCHAR $1 }
         | STRING            { sL1 $1 $ HsString     (getSTRINGs $1)
-                                                    $ getSTRING $1 }
+                                                    $ T.pack $ getSTRING $1 }
         | PRIMINTEGER       { sL1 $1 $ HsIntPrim    (getPRIMINTEGERs $1)
                                                     $ getPRIMINTEGER $1 }
         | PRIMWORD          { sL1 $1 $ HsWordPrim   (getPRIMWORDs $1)
@@ -4148,7 +4148,7 @@ getOVERLAPS_PRAGs     (L _ (IToverlaps_prag     src)) = src
 getINCOHERENT_PRAGs   (L _ (ITincoherent_prag   src)) = src
 getCTYPEs             (L _ (ITctype             src)) = src
 
-getStringLiteral l = StringLiteral (getSTRINGs l) (getSTRING l) Nothing
+getStringLiteral l = StringLiteral (getSTRINGs l) (T.pack $ getSTRING l) Nothing
 
 isUnicode :: Located Token -> Bool
 isUnicode (L _ (ITforall         iu)) = iu == UnicodeSyntax

@@ -1362,9 +1362,7 @@ cvtOverLit (IntegerL i)
 cvtOverLit (RationalL r)
   = do { force r; return $ mkHsFractional (mkTHFractionalLit r) }
 cvtOverLit (StringL s)
-  = do { let { s' = mkFastString s }
-       ; force s'
-       ; return $ mkHsIsString (quotedSourceText s) s'
+  = do { force s; return $ mkHsIsString (quotedSourceText s) (T.pack s)
        }
 cvtOverLit _ = panic "Convert.cvtOverLit: Unexpected overloaded literal"
 -- An Integer is like an (overloaded) '3' in a Haskell source program

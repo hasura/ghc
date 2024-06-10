@@ -331,7 +331,7 @@ nlParPat p = noLocA (gParPat p)
 
 mkHsIntegral   :: IntegralLit -> HsOverLit GhcPs
 mkHsFractional :: FractionalLit -> HsOverLit GhcPs
-mkHsIsString   :: SourceText -> FastString -> HsOverLit GhcPs
+mkHsIsString   :: SourceText -> T.Text -> HsOverLit GhcPs
 mkHsDo         :: HsDoFlavour -> LocatedL [ExprLStmt GhcPs] -> HsExpr GhcPs
 mkHsDoAnns     :: HsDoFlavour -> LocatedL [ExprLStmt GhcPs] -> AnnList -> HsExpr GhcPs
 mkHsComp       :: HsDoFlavour -> [ExprLStmt GhcPs] -> LHsExpr GhcPs

@@ -87,6 +87,7 @@ import Haddock.Types
 
 import Data.Either (lefts, partitionEithers, rights)
 import Data.Maybe (catMaybes, mapMaybe, maybeToList)
+import GHC.Data.FastString (fastStringToText)
 
 -- | Whether or not to default 'RuntimeRep' variables to 'LiftedRep'. Check
 -- out Note [Defaulting RuntimeRep variables] in GHC.Iface.Type for the
@@ -754,7 +755,7 @@ synifyType _ vs (TyConApp tc tys) =
       | tc `hasKey` ipClassKey
       , [name, ty] <- tys
       , Just x <- isStrLitTy name =
-          noLocA $ HsIParamTy noAnn (noLocA $ HsIPName x) (synifyType WithinType vs ty)
+          noLocA $ HsIParamTy noAnn (noLocA $ HsIPName (fastStringToText x)) (synifyType WithinType vs ty)
       -- and equalities
       | tc `hasKey` eqTyConKey
       , [ty1, ty2] <- tys =
@@ -1005,7 +1006,7 @@ synifyPatSynType ps =
 
 synifyTyLit :: TyLit -> HsTyLit GhcRn
 synifyTyLit (NumTyLit n) = HsNumTy NoSourceText n
-synifyTyLit (StrTyLit s) = HsStrTy NoSourceText s
+synifyTyLit (StrTyLit s) = HsStrTy NoSourceText (fastStringToText s)
 synifyTyLit (CharTyLit c) = HsCharTy NoSourceText c
 
 synifyKindSig :: Kind -> LHsKind GhcRn

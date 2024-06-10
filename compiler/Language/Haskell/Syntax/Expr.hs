@@ -36,8 +36,6 @@ import Language.Haskell.Syntax.Binds
 import GHC.Types.Fixity (LexicalFixity(Infix), Fixity)
 import GHC.Types.SourceText (StringLiteral)
 
-import GHC.Data.FastString (FastString)
-
 -- libraries:
 import Data.Data hiding (Fixity(..))
 import Data.Bool
@@ -1436,7 +1434,7 @@ data HsUntypedSplice id
    | HsQuasiQuote            -- See Note [Quasi-quote overview]
         (XQuasiQuote id)
         (IdP id)             -- The quoter (the bit between `[` and `|`)
-        (XRec id FastString) -- The enclosed string
+        (XRec id Text) -- The enclosed string
 
    | XUntypedSplice !(XXUntypedSplice id) -- Extension point; see Note [Trees That Grow]
                                           -- in Language.Haskell.Syntax.Extension

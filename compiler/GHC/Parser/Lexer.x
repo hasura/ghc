@@ -984,11 +984,11 @@ data Token
   | ITdollar                            --  prefix $
   | ITdollardollar                      --  prefix $$
   | ITtyQuote                           --  ''
-  | ITquasiQuote (FastString,FastString,PsSpan)
+  | ITquasiQuote (FastString,Text,PsSpan)
     -- ITquasiQuote(quoter, quote, loc)
     -- represents a quasi-quote of the form
     -- [quoter| quote |]
-  | ITqQuasiQuote (FastString,FastString,FastString,PsSpan)
+  | ITqQuasiQuote (FastString,FastString,Text,PsSpan)
     -- ITqQuasiQuote(Qual, quoter, quote, loc)
     -- represents a qualified quasi-quote of the form
     -- [Qual.quoter| quote |]
@@ -1720,7 +1720,7 @@ qvarid, qconid :: StringBuffer -> Int -> Token
 qvarid buf len = ITqvarid $! splitQualName buf len False
 qconid buf len = ITqconid $! splitQualName buf len False
 
-splitQualName :: StringBuffer -> Int -> Bool -> (FastString,FastString)
+splitQualName :: StringBuffer -> Int -> Bool -> (FastString, FastString)
 -- takes a StringBuffer and a length, and returns the module name
 -- and identifier parts of a qualified name.  Splits at the *last* dot,
 -- because of hierarchical module names.
@@ -2491,7 +2491,7 @@ lex_qquasiquote_tok span buf len _buf2 = do
   return (L (mkPsSpan (psSpanStart span) end)
            (ITqQuasiQuote (qual,
                            quoter,
-                           mkFastString (reverse quote),
+                           T.pack (reverse quote),
                            mkPsSpan quoteStart end)))
 
 lex_quasiquote_tok :: Action
@@ -2504,7 +2504,7 @@ lex_quasiquote_tok span buf len _buf2 = do
   end <- getParsedLoc
   return (L (mkPsSpan (psSpanStart span) end)
            (ITquasiQuote (mkFastString quoter,
-                          mkFastString (reverse quote),
+                          T.pack (reverse quote),
                           mkPsSpan quoteStart end)))
 
 lex_quasiquote :: RealSrcLoc -> String -> P String
