@@ -1628,12 +1628,12 @@ datafam_inst_hdr :: { Located (Maybe (LHsContext GhcPs), HsOuterFamEqnTyVarBndrs
 
 capi_ctype :: { Maybe (LocatedP CType) }
 capi_ctype : '{-# CTYPE' STRING STRING '#-}'
-                       {% fmap Just $ amsr (sLL $1 $> (CType (getCTYPEs $1) (Just (Header (getSTRINGs $2) (getSTRING $2)))
-                                        (getSTRINGs $3,getSTRING $3)))
+                       {% fmap Just $ amsr (sLL $1 $> (CType (getCTYPEs $1) (Just (Header (getSTRINGs $2) (mkFastString $ getSTRING $2)))
+                                        (getSTRINGs $3,T.pack $ getSTRING $3)))
                               (AnnPragma (mo $1) (mc $4) [mj AnnHeader $2,mj AnnVal $3]) }
 
            | '{-# CTYPE'        STRING '#-}'
-                       {% fmap Just $ amsr (sLL $1 $> (CType (getCTYPEs $1) Nothing (getSTRINGs $2, getSTRING $2)))
+                       {% fmap Just $ amsr (sLL $1 $> (CType (getCTYPEs $1) Nothing (getSTRINGs $2, T.pack $ getSTRING $2)))
                               (AnnPragma (mo $1) (mc $3) [mj AnnVal $2]) }
 
            |           { Nothing }
@@ -1901,7 +1901,7 @@ rule    :: { LRuleDecl GhcPs }
            runPV (unECP $6) >>= \ $6 ->
            amsA' (sLL $1 $> $ HsRule
                                    { rd_ext = (((fstOf3 $3) (mj AnnEqual $5 : (fst $2))), getSTRINGs $1)
-                                   , rd_name = L (noAnnSrcSpan $ gl $1) (getSTRING $1)
+                                   , rd_name = L (noAnnSrcSpan $ gl $1) (mkFastString $ getSTRING $1)
                                    , rd_act = (snd $2) `orElse` AlwaysActive
                                    , rd_tyvs = sndOf3 $3, rd_tmvs = thdOf3 $3
                                    , rd_lhs = $4, rd_rhs = $6 }) }
@@ -1998,7 +1998,7 @@ maybe_warning_pragma :: { Maybe (LWarningTxt GhcPs) }
 
 warning_category :: { Maybe (LocatedE InWarningCategory) }
         : 'in' STRING                  { Just (reLoc $ sLL $1 $> $ InWarningCategory (epTok $1) (getSTRINGs $2)
-                                                                    (reLoc $ sL1 $2 $ mkWarningCategory (getSTRING $2))) }
+                                                                    (reLoc $ sL1 $2 $ mkWarningCategory (mkFastString $ getSTRING $2))) }
         | {- empty -}                  { Nothing }
 
 warnings :: { OrdList (LWarnDecl GhcPs) }
@@ -2123,7 +2123,7 @@ fspec :: { Located ([AddEpAnn]
                                              ,(L (getLoc $1)
                                                     (getStringLiteral $1), $2, $4)) }
        |        var '::' sigtype        { sLL $1 $> ([mu AnnDcolon $2]
-                                             ,(noLoc (StringLiteral NoSourceText nilFS Nothing), $1, $3)) }
+                                             ,(noLoc (StringLiteral NoSourceText T.empty Nothing), $1, $3)) }
          -- if the entity string is missing, it defaults to the empty string;
          -- the meaning of an empty entity string depends on the calling
          -- convention
@@ -2335,7 +2335,7 @@ atype :: { LHsType GhcPs }
         | CHAR                 { sLLa $1 $> $ HsTyLit noExtField $ HsCharTy (getCHARs $1)
                                                                         (getCHAR $1) }
         | STRING               { sLLa $1 $> $ HsTyLit noExtField $ HsStrTy (getSTRINGs $1)
-                                                                     (getSTRING  $1) }
+                                                                     (T.pack $ getSTRING  $1) }
         | '_'                  { sL1a $1 $ mkAnonWildCardTy }
         -- Type variables are never exported, so `M.tyvar` will be rejected by the renamer.
         -- We let it pass the parser because the renamer can generate a better error message.
@@ -2878,7 +2878,7 @@ prag_e :: { Located (HsPragE GhcPs) }
                                              (HsPragSCC
                                                (AnnPragma (mo $1) (mc $3) [mj AnnVal $2],
                                                (getSCC_PRAGs $1))
-                                               (StringLiteral NoSourceText (getVARID $2) Nothing)) }
+                                               (StringLiteral NoSourceText (fastStringToText $ getVARID $2) Nothing)) }
 
 fexp    :: { ECP }
         : fexp aexp                  { ECP $
@@ -4173,12 +4173,12 @@ hasE (L _ (ITopenExpQuote HasE _)) = True
 hasE (L _ (ITopenTExpQuote HasE))  = True
 hasE _                             = False
 
-getSCC :: Located Token -> P FastString
+getSCC :: Located Token -> P T.Text
 getSCC lt = do let s = getSTRING lt
                -- We probably actually want to be more restrictive than this
-               if ' ' `elem` unpackFS s
+               if ' ' `elem` s
                    then addFatalError $ mkPlainErrorMsgEnvelope (getLoc lt) $ PsErrSpaceInSCC
-                   else return s
+                   else return (T.pack s)
 
 stringLiteralToHsDocWst :: Located StringLiteral -> LocatedE (WithHsDocIdentifiers StringLiteral GhcPs)
 stringLiteralToHsDocWst  sl = reLoc $ lexStringLiteral parseIdentifier sl
