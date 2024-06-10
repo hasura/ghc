@@ -51,7 +51,6 @@ module Language.Haskell.Syntax.Type (
         HsConDetails(..), noTypeArgs, conDetailsArity,
 
         FieldOcc(..), LFieldOcc,
-        AmbiguousFieldOcc(..), LAmbiguousFieldOcc,
 
         mapHsOuterImplicit,
         hsQTvExplicit,
@@ -63,7 +62,6 @@ import {-# SOURCE #-} Language.Haskell.Syntax.Expr ( HsUntypedSplice )
 
 import Language.Haskell.Syntax.Extension
 
-import GHC.Types.Name.Reader ( RdrName )
 import GHC.Core.DataCon( HsSrcBang(..) )
 import GHC.Core.Type (Specificity)
 import GHC.Types.Basic (Arity)
@@ -1286,37 +1284,19 @@ type LFieldOcc pass = XRec pass (FieldOcc pass)
 -- We store both the 'RdrName' the user originally wrote, and after
 -- the renamer we use the extension field to store the selector
 -- function.
+--
+-- See Note [Lifecycle of a FieldOcc]
 data FieldOcc pass
   = FieldOcc {
         foExt :: XCFieldOcc pass
-      , foLabel :: XRec pass RdrName -- See Note [Located RdrNames] in Language.Haskell.Syntax.Expr
+      , foLabel :: LIdP pass
       }
   | XFieldOcc !(XXFieldOcc pass)
 deriving instance (
-    Eq (XRec pass RdrName)
+    Eq (LIdP pass)
   , Eq (XCFieldOcc pass)
   , Eq (XXFieldOcc pass)
   ) => Eq (FieldOcc pass)
-
--- | Located Ambiguous Field Occurrence
-type LAmbiguousFieldOcc pass = XRec pass (AmbiguousFieldOcc pass)
-
--- | Ambiguous Field Occurrence
---
--- Represents an *occurrence* of a field that is potentially
--- ambiguous after the renamer, with the ambiguity resolved by the
--- typechecker.  We always store the 'RdrName' that the user
--- originally wrote, and store the selector function after the renamer
--- (for unambiguous occurrences) or the typechecker (for ambiguous
--- occurrences).
---
--- See Note [HsRecField and HsRecUpdField] in "GHC.Hs.Pat".
--- See Note [Located RdrNames] in "GHC.Hs.Expr".
-data AmbiguousFieldOcc pass
-  = Unambiguous (XUnambiguous pass) (XRec pass RdrName)
-  | Ambiguous   (XAmbiguous pass)   (XRec pass RdrName)
-  | XAmbiguousFieldOcc !(XXAmbiguousFieldOcc pass)
-
 
 {-
 ************************************************************************

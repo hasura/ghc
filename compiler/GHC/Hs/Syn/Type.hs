@@ -102,7 +102,7 @@ lhsExprType (L _ e) = hsExprType e
 hsExprType :: HsExpr GhcTc -> Type
 hsExprType (HsVar _ (L _ id)) = idType id
 hsExprType (HsUnboundVar (HER _ ty _) _) = ty
-hsExprType (HsRecSel _ (FieldOcc id _)) = idType id
+hsExprType (HsRecSel _ (FieldOcc _ id)) = idType (unLoc id)
 hsExprType (HsOverLabel v _ _) = dataConCantHappen v
 hsExprType (HsIPVar v _) = dataConCantHappen v
 hsExprType (HsOverLit _ lit) = overLitType lit

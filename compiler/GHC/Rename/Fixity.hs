@@ -202,5 +202,6 @@ lookupFixityRn_help name
 lookupTyFixityRn :: LocatedN Name -> RnM Fixity
 lookupTyFixityRn = lookupFixityRn . unLoc
 
-lookupFieldFixityRn :: FieldOcc GhcRn -> RnM Fixity
-lookupFieldFixityRn (FieldOcc n _) = lookupFixityRn n
+lookupFieldFixityRn :: FieldOcc GhcRn -> RnM (Maybe Fixity)
+lookupFieldFixityRn (FieldOcc _ n) = Just <$> lookupFixityRn (unLoc n)
+lookupFieldFixityRn _ = pure Nothing

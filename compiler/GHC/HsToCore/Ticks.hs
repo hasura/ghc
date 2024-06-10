@@ -477,7 +477,7 @@ addBinTickLHsExpr boxLabel e@(L pos e0)
 addTickHsExpr :: HsExpr GhcTc -> TM (HsExpr GhcTc)
 addTickHsExpr e@(HsVar _ (L _ id))  = do freeVar id; return e
 addTickHsExpr e@(HsUnboundVar {})   = return e
-addTickHsExpr e@(HsRecSel _ (FieldOcc id _))   = do freeVar id; return e
+addTickHsExpr e@(HsRecSel _ (FieldOcc _ id))   = do freeVar (unLoc id); return e
 
 addTickHsExpr e@(HsIPVar {})            = return e
 addTickHsExpr e@(HsOverLit {})          = return e

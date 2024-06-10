@@ -49,7 +49,6 @@ import GHC.Types.SrcLoc as SrcLoc
 import GHC.Types.Var
 import GHC.Data.Bag
 import GHC.Data.BooleanFormula (LBooleanFormula)
-import GHC.Types.Name.Reader
 import GHC.Types.Name
 
 import GHC.Utils.Outputable
@@ -653,7 +652,7 @@ pprTicks pp_no_debug pp_when_debug
          then pp_when_debug
          else pp_no_debug
 
-instance Outputable (XRec a RdrName) => Outputable (RecordPatSynField a) where
+instance Outputable (XRec pass (IdP pass)) => Outputable (RecordPatSynField pass) where
     ppr (RecordPatSynField { recordPatSynField = v }) = ppr v
 
 

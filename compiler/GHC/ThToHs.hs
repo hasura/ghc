@@ -1147,7 +1147,7 @@ cvtl e = wrapLA (cvt e)
                               ; return $ mkRdrRecordCon c' (HsRecFields flds' Nothing) noAnn }
     cvt (RecUpdE e flds) = do { e' <- cvtl e
                               ; flds'
-                                  <- mapM (cvtFld (wrapParLA mkAmbiguousFieldOcc))
+                                  <- mapM (cvtFld (wrapParLA mkFieldOcc))
                                            flds
                               ; return $ RecordUpd noAnn e' $
                                          RegularRecUpdFields
