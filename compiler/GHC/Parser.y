@@ -831,7 +831,7 @@ moduleid :: { LHsModuleId PackageName }
           | unitid ':' modid    { sLL $1 $> $ HsModuleId $1 (reLoc $3) }
 
 pkgname :: { Located PackageName }
-        : STRING     { sL1 $1 $ PackageName (getSTRING $1) }
+        : STRING     { sL1 $1 $ PackageName (mkFastString $ getSTRING $1) }
         | litpkgname { sL1 $1 $ PackageName (unLoc $1) }
 
 litpkgname_segment :: { Located FastString }
@@ -1160,11 +1160,11 @@ maybe_safe :: { (Maybe EpaLocation,Bool) }
         | {- empty -}                           { (Nothing,      False) }
 
 maybe_pkg :: { (Maybe EpaLocation, RawPkgQual) }
-        : STRING  {% do { let { pkgFS = getSTRING $1 }
-                        ; unless (looksLikePackageName (unpackFS pkgFS)) $
+        : STRING  {% do { let { pkgS = getSTRING $1 }
+                        ; unless (looksLikePackageName pkgS) $
                              addError $ mkPlainErrorMsgEnvelope (getLoc $1) $
-                               (PsErrInvalidPackageName pkgFS)
-                        ; return (Just (glAA $1), RawPkgQual (StringLiteral (getSTRINGs $1) pkgFS Nothing)) } }
+                               (PsErrInvalidPackageName pkgS)
+                        ; return (Just (glAA $1), RawPkgQual (StringLiteral (getSTRINGs $1) (T.pack pkgS) Nothing)) } }
         | {- empty -}                           { (Nothing,NoRawPkgQual) }
 
 optqualified :: { Located (Maybe EpaLocation) }

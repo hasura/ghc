@@ -954,7 +954,7 @@ data Token
                                          -- Note [Literal source text] in "GHC.Types.SourceText"
 
   | ITchar     SourceText Char       -- Note [Literal source text] in "GHC.Types.SourceText"
-  | ITstring   SourceText Text       -- Note [Literal source text] in "GHC.Types.SourceText"
+  | ITstring   SourceText String     -- Note [Literal source text] in "GHC.Types.SourceText"
   | ITinteger  IntegralLit           -- Note [Literal source text] in "GHC.Types.SourceText"
   | ITrational FractionalLit
 
@@ -2200,7 +2200,7 @@ lex_string_tok span buf _len _buf2 = do
   let
     tok = case lexed of
       LexedPrimString s -> ITprimstring (SourceText src) (unsafeMkByteString s)
-      LexedRegularString s -> ITstring (SourceText src) (T.pack s)
+      LexedRegularString s -> ITstring (SourceText src) s
     src = lexemeToFastString buf (cur bufEnd - cur buf)
   return $ L (mkPsSpan (psSpanStart span) end) tok
 
