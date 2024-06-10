@@ -149,14 +149,7 @@ void _warnFail(const char *filename, unsigned int linenum);
     do { (void) sizeof(predicate); } while(0)
 #endif /* DEBUG */
 
-#if __STDC_VERSION__ >= 201112L
-// `_Static_assert` is provided by C11 but is deprecated and replaced by
-// `static_assert` in C23. Perhaps some day we should instead use the latter.
-// See #22777.
 #define GHC_STATIC_ASSERT(x, msg) _Static_assert((x), msg)
-#else
-#define GHC_STATIC_ASSERT(x, msg)
-#endif
 
 /*
  * Use this on the RHS of macros which expand to nothing
