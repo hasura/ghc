@@ -1296,8 +1296,8 @@ pprHsChar c | c > '\x10ffff' = char '\\' <> text (show (fromIntegral (ord c) :: 
             | otherwise      = text (show c)
 
 -- | Special combinator for showing string literals.
-pprHsString :: FastString -> SDoc
-pprHsString fs = vcat (map text (showMultiLineString (unpackFS fs)))
+pprHsString :: String -> SDoc
+pprHsString fs = vcat (map text (showMultiLineString fs))
 
 -- | Special combinator for showing bytestring literals.
 pprHsBytes :: ByteString -> SDoc

@@ -36,6 +36,9 @@ import Language.Haskell.Syntax.Expr ( HsExpr )
 import Language.Haskell.Syntax.Extension
 import Language.Haskell.Syntax.Lit
 
+import qualified Data.Text as T
+import GHC.Data.FastString (unpackFS)
+
 {-
 ************************************************************************
 *                                                                      *
@@ -192,7 +195,7 @@ Equivalently it's True if
 instance Outputable (HsLit (GhcPass p)) where
     ppr (HsChar st c)       = pprWithSourceText st (pprHsChar c)
     ppr (HsCharPrim st c)   = pprWithSourceText st (pprPrimChar c)
-    ppr (HsString st s)     = pprWithSourceText st (pprHsString s)
+    ppr (HsString st s)     = pprWithSourceText st (pprHsString (T.unpack s))
     ppr (HsStringPrim st s) = pprWithSourceText st (pprHsBytes s)
     ppr (HsInt _ i)
       = pprWithSourceText (il_text i) (integer (il_value i))
@@ -220,7 +223,7 @@ instance OutputableBndrId p
 instance Outputable OverLitVal where
   ppr (HsIntegral i)     = pprWithSourceText (il_text i) (integer (il_value i))
   ppr (HsFractional f)   = ppr f
-  ppr (HsIsString st s)  = pprWithSourceText st (pprHsString s)
+  ppr (HsIsString st s)  = pprWithSourceText st (pprHsString (unpackFS s))
 
 -- | pmPprHsLit pretty prints literals and is used when pretty printing pattern
 -- match warnings. All are printed the same (i.e., without hashes if they are
@@ -231,7 +234,7 @@ instance Outputable OverLitVal where
 pmPprHsLit :: HsLit (GhcPass x) -> SDoc
 pmPprHsLit (HsChar _ c)       = pprHsChar c
 pmPprHsLit (HsCharPrim _ c)   = pprHsChar c
-pmPprHsLit (HsString st s)    = pprWithSourceText st (pprHsString s)
+pmPprHsLit (HsString st s)    = pprWithSourceText st (pprHsString (T.unpack s))
 pmPprHsLit (HsStringPrim _ s) = pprHsBytes s
 pmPprHsLit (HsInt _ i)        = integer (il_value i)
 pmPprHsLit (HsIntPrim _ i)    = integer i

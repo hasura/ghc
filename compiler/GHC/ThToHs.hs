@@ -1400,9 +1400,7 @@ cvtLit (DoublePrimL f)
   = do { force f; return $ HsDoublePrim noExtField (mkTHFractionalLit f) }
 cvtLit (CharL c)       = do { force c; return $ HsChar NoSourceText c }
 cvtLit (CharPrimL c)   = do { force c; return $ HsCharPrim NoSourceText c }
-cvtLit (StringL s)     = do { let { s' = mkFastString s }
-                            ; force s'
-                            ; return $ HsString (quotedSourceText s) s' }
+cvtLit (StringL s)     = do { return $ HsString (quotedSourceText s) (T.pack s) }
 cvtLit (StringPrimL s) = do { let { !s' = BS.pack s }
                             ; return $ HsStringPrim NoSourceText s' }
 cvtLit (BytesPrimL (Bytes fptr off sz)) = do

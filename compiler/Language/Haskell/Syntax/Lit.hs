@@ -32,6 +32,7 @@ import Data.Ord
 import Data.Eq
 import Data.Char
 import Prelude (Integer)
+import Data.Text (Text)
 
 {-
 ************************************************************************
@@ -51,7 +52,7 @@ data HsLit x
       -- ^ Character
   | HsCharPrim (XHsCharPrim x) {- SourceText -} Char
       -- ^ Unboxed character
-  | HsString (XHsString x) {- SourceText -} FastString
+  | HsString (XHsString x) {- SourceText -} Text
       -- ^ String
   | HsStringPrim (XHsStringPrim x) {- SourceText -} !ByteString
       -- ^ Packed bytes
