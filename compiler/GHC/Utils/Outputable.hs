@@ -154,6 +154,8 @@ import Data.List (intersperse)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Semigroup (Arg(..))
 import qualified Data.List.NonEmpty as NEL
+import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Time ( UTCTime )
 import Data.Time.Format.ISO8601
 import Data.Void
@@ -1050,6 +1052,9 @@ instance (Outputable a, Outputable b, Outputable c, Outputable d, Outputable e, 
 instance Outputable FastString where
     ppr fs = ftext fs           -- Prints an unadorned string,
                                 -- no double quotes or anything
+
+instance Outputable Text where
+    ppr = text . T.unpack
 
 deriving newtype instance Outputable NonDetFastString
 deriving newtype instance Outputable LexicalFastString

@@ -43,6 +43,7 @@ module GHC.Data.FastString
         fastStringToByteString,
         mkFastStringByteString,
         fastZStringToByteString,
+        fastStringToText,
         unsafeMkByteString,
 
         -- * ShortByteString
@@ -167,6 +168,9 @@ fastStringToShortText = ShortText . fs_sbs
 
 fastZStringToByteString :: FastZString -> ByteString
 fastZStringToByteString (FastZString bs) = bs
+
+fastStringToText :: FastString -> T.Text
+fastStringToText = T.decodeUtf8 . bytesFS
 
 -- This will drop information if any character > '\xFF'
 unsafeMkByteString :: String -> ByteString

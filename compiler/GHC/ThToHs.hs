@@ -959,7 +959,7 @@ cvtPragmaD (CompleteP cls mty)
 cvtPragmaD (SCCP nm str) = do
   nm' <- vcNameN nm
   str' <- traverse (\s ->
-    returnLA $ StringLiteral NoSourceText (mkFastString s) Nothing) str
+    returnLA $ StringLiteral NoSourceText (T.pack s) Nothing) str
   returnJustLA $ Hs.SigD noExtField
     $ SCCFunSig (noAnn, SourceText $ fsLit "{-# SCC") nm' str'
 
@@ -1905,7 +1905,7 @@ split_ty_app ty = go ty []
 
 cvtTyLit :: TH.TyLit -> HsTyLit (GhcPass p)
 cvtTyLit (TH.NumTyLit i) = HsNumTy NoSourceText i
-cvtTyLit (TH.StrTyLit s) = HsStrTy NoSourceText (fsLit s)
+cvtTyLit (TH.StrTyLit s) = HsStrTy NoSourceText (T.pack s)
 cvtTyLit (TH.CharTyLit c) = HsCharTy NoSourceText c
 
 {- | @cvtOpAppT x op y@ converts @op@ and @y@ and produces the operator
@@ -2119,7 +2119,7 @@ fldNameN con n = wrapLN (fldName con n)
 ipName :: String -> CvtM HsIPName
 ipName n
   = do { unless (okVarOcc n) (failWith (IllegalOccName OccName.varName n))
-       ; return (HsIPName (fsLit n)) }
+       ; return (HsIPName (T.pack n)) }
 
 cvtName :: OccName.NameSpace -> TH.Name -> CvtM RdrName
 cvtName ctxt_ns (TH.Name occ flavour)

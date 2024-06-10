@@ -1067,7 +1067,7 @@ instance Outputable (HsPragE (GhcPass p)) where
     pprWithSourceText st (text "{-# SCC")
      -- no doublequotes if stl empty, for the case where the SCC was written
      -- without quotes.
-    <+> pprWithSourceText stl (ftext lbl) <+> text "#-}"
+    <+> pprWithSourceText stl (text $ T.unpack lbl) <+> text "#-}"
 
 
 {- *********************************************************************

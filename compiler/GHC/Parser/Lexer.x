@@ -458,7 +458,7 @@ $unigraphic / { isSmartQuote } { smart_quote_error }
 }
 
 <0> {
-  \? @varid / { ifExtension IpBit } { skip_one_varid ITdupipvarid }
+  \? @varid / { ifExtension IpBit } { skip_one_varid_text ITdupipvarid }
 }
 
 <0> {
@@ -947,14 +947,14 @@ data Token
   | ITqvarsym (FastString,FastString)
   | ITqconsym (FastString,FastString)
 
-  | ITdupipvarid   FastString   -- GHC extension: implicit param: ?x
+  | ITdupipvarid Text                    -- GHC extension: implicit param: ?x
   | ITlabelvarid SourceText Text         -- Overloaded label: #x
                                          -- The SourceText is required because we can
                                          -- have a string literal as a label
                                          -- Note [Literal source text] in "GHC.Types.SourceText"
 
   | ITchar     SourceText Char       -- Note [Literal source text] in "GHC.Types.SourceText"
-  | ITstring   SourceText FastString -- Note [Literal source text] in "GHC.Types.SourceText"
+  | ITstring   SourceText Text       -- Note [Literal source text] in "GHC.Types.SourceText"
   | ITinteger  IntegralLit           -- Note [Literal source text] in "GHC.Types.SourceText"
   | ITrational FractionalLit
 
@@ -1219,6 +1219,10 @@ qdo_token con span buf len _buf2 = do
 skip_one_varid :: (FastString -> Token) -> Action
 skip_one_varid f span buf len _buf2
   = return (L span $! f (lexemeToFastString (stepOn buf) (len-1)))
+
+skip_one_varid_text :: (Text -> Token) -> Action
+skip_one_varid_text f span buf len _buf2
+  = return (L span $! f (lexemeToText (stepOn buf) (len-1)))
 
 skip_one_varid_src :: (SourceText -> FastString -> Token) -> Action
 skip_one_varid_src f span buf len _buf2
@@ -2196,7 +2200,7 @@ lex_string_tok span buf _len _buf2 = do
   let
     tok = case lexed of
       LexedPrimString s -> ITprimstring (SourceText src) (unsafeMkByteString s)
-      LexedRegularString s -> ITstring (SourceText src) (mkFastString s)
+      LexedRegularString s -> ITstring (SourceText src) (T.pack s)
     src = lexemeToFastString buf (cur bufEnd - cur buf)
   return $ L (mkPsSpan (psSpanStart span) end) tok
 
