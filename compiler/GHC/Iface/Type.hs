@@ -2477,22 +2477,6 @@ instance Binary IfaceCoercion where
                    return $ IfaceAxiomRuleCo a b
            _ -> panic ("get IfaceCoercion " ++ show tag)
 
-instance Binary UnivCoProvenance where
-  put_ bh PhantomProv         = putByte bh 1
-  put_ bh ProofIrrelProv = putByte bh 2
-  put_ bh (PluginProv a) = do { putByte bh 3
-                              ; put_ bh a }
-
-  get bh = do
-      tag <- getByte bh
-      case tag of
-           1 -> return PhantomProv
-           2 -> return ProofIrrelProv
-           3 -> do a <- get bh
-                   return $ PluginProv a
-           _ -> panic ("get IfaceUnivCoProv " ++ show tag)
-
-
 instance Binary (DefMethSpec IfaceType) where
     put_ bh VanillaDM     = putByte bh 0
     put_ bh (GenericDM t) = putByte bh 1 >> put_ bh t

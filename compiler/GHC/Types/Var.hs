@@ -377,7 +377,7 @@ instance NamedThing Var where
 
 instance NFData Var where
   rnf v = v `seq` ()
-  
+
 instance Uniquable Var where
   getUnique = varUnique
 

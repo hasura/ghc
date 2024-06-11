@@ -1000,6 +1000,22 @@ instance Outputable FunSel where
   ppr SelArg  = text "arg"
   ppr SelRes  = text "res"
 
+instance Binary UnivCoProvenance where
+  put_ bh PhantomProv         = putByte bh 1
+  put_ bh ProofIrrelProv = putByte bh 2
+  put_ bh (PluginProv a) = do { putByte bh 3
+                              ; put_ bh a }
+
+  get bh = do
+      tag <- getByte bh
+      case tag of
+           1 -> return PhantomProv
+           2 -> return ProofIrrelProv
+           3 -> do a <- get bh
+                   return $ PluginProv a
+           _ -> panic ("get UnivCoProvenance " ++ show tag)
+
+
 instance Binary CoSel where
    put_ bh (SelTyCon n r)   = do { putByte bh 0; put_ bh n; put_ bh r }
    put_ bh SelForAll        = putByte bh 1
