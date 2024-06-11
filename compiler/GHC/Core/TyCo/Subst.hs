@@ -888,8 +888,10 @@ subst_co subst co
     go (FunCo r afl afr w co1 co2)   = ((mkFunCo2 r afl afr $! go w) $! go co1) $! go co2
     go (CoVarCo cv)          = substCoVar subst cv
     go (AxiomInstCo con ind cos) = mkAxiomInstCo con ind $! map go cos
-    go (UnivCo p r t1 t2)    = (((mkUnivCo $! go_prov p) $! r) $!
-                                (go_ty t1)) $! (go_ty t2)
+    go (UnivCo { uco_prov = p, uco_role = r
+               , uco_lty = t1, uco_rty = t2, uco_cvs = cvs })
+                             = ((((mkUnivCo $! p) $! go_cvs cvs) $! r) $!
+                                  (go_ty t1)) $! (go_ty t2)
     go (SymCo co)            = mkSymCo $! (go co)
     go (TransCo co1 co2)     = (mkTransCo $! (go co1)) $! (go co2)
     go (SelCo d co)          = mkSelCo d $! (go co)
@@ -901,9 +903,7 @@ subst_co subst co
                                 in cs1 `seqList` AxiomRuleCo c cs1
     go (HoleCo h)            = HoleCo $! go_hole h
 
-    go_prov (PhantomProv kco)    = PhantomProv (go kco)
-    go_prov (ProofIrrelProv kco) = ProofIrrelProv (go kco)
-    go_prov (PluginProv s cvs)   = PluginProv s $ substDCoVarSet subst cvs
+    go_cvs cvs = substDCoVarSet subst cvs
 
     -- See Note [Substituting in a coercion hole]
     go_hole h@(CoercionHole { ch_co_var = cv })

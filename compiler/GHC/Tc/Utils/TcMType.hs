@@ -1564,9 +1564,9 @@ collect_cand_qtvs_co orig_ty cur_lvl bound = go_co
     go_co dv (FunCo _ _ _ w co1 co2) = foldlM go_co dv [w, co1, co2]
     go_co dv (AxiomInstCo _ _ cos)   = foldlM go_co dv cos
     go_co dv (AxiomRuleCo _ cos)     = foldlM go_co dv cos
-    go_co dv (UnivCo prov _ t1 t2)   = do { dv1 <- go_prov dv prov
-                                          ; dv2 <- collect_cand_qtvs orig_ty True cur_lvl bound dv1 t1
-                                          ; collect_cand_qtvs orig_ty True cur_lvl bound dv2 t2 }
+    go_co dv (UnivCo { uco_lty = t1, uco_rty = t2 })
+                                     = do { dv1 <- collect_cand_qtvs orig_ty True cur_lvl bound dv t1
+                                          ; collect_cand_qtvs orig_ty True cur_lvl bound dv1 t2 }
     go_co dv (SymCo co)              = go_co dv co
     go_co dv (TransCo co1 co2)       = foldlM go_co dv [co1, co2]
     go_co dv (SelCo _ co)            = go_co dv co
@@ -1589,10 +1589,6 @@ collect_cand_qtvs_co orig_ty cur_lvl bound = go_co
 
     go_mco dv MRefl    = return dv
     go_mco dv (MCo co) = go_co dv co
-
-    go_prov dv (PhantomProv co)    = go_co dv co
-    go_prov dv (ProofIrrelProv co) = go_co dv co
-    go_prov dv (PluginProv _ cvs)  = strictFoldDVarSet zt_cv (return dv) cvs
 
     zt_cv :: CoVar -> TcM CandidatesQTvs -> TcM CandidatesQTvs
     zt_cv cv mdvs = do { dvs <- mdvs; go_cv dvs cv }

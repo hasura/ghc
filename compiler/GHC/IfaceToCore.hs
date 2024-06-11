@@ -1473,8 +1473,13 @@ tcIfaceCo = go
                                         ForAllCo tv' visL visR k' <$> go c }
     go (IfaceCoVarCo n)          = CoVarCo <$> go_var n
     go (IfaceAxiomInstCo n i cs) = AxiomInstCo <$> tcIfaceCoAxiom n <*> pure i <*> mapM go cs
-    go (IfaceUnivCo p r t1 t2)   = UnivCo <$> tcIfaceUnivCoProv p <*> pure r
-                                          <*> tcIfaceType t1 <*> tcIfaceType t2
+    go (IfaceUnivCo p r t1 t2 cvs fcvs)
+                                 = do { t1' <- tcIfaceType t1; t2' <- tcIfaceType t2
+                                      ; cvs' <- assertPpr (null fcvs) (ppr fcvs) $
+                                                mapM tcIfaceLclId cvs
+                                      ; return (UnivCo { uco_prov = p, uco_role = r
+                                                       , uco_lty = t1', uco_rty = t2'
+                                                       , uco_cvs = mkDVarSet cvs' }) }
     go (IfaceSymCo c)            = SymCo    <$> go c
     go (IfaceTransCo c1 c2)      = TransCo  <$> go c1
                                             <*> go c2
@@ -1492,14 +1497,6 @@ tcIfaceCo = go
 
     go_var :: IfLclName -> IfL CoVar
     go_var = tcIfaceLclId
-
-tcIfaceUnivCoProv :: IfaceUnivCoProv -> IfL UnivCoProvenance
-tcIfaceUnivCoProv (IfacePhantomProv kco)    = PhantomProv <$> tcIfaceCo kco
-tcIfaceUnivCoProv (IfaceProofIrrelProv kco) = ProofIrrelProv <$> tcIfaceCo kco
-tcIfaceUnivCoProv (IfacePluginProv str cvs fcvs) =
-  assertPpr (null fcvs) (ppr fcvs) $ do
-    cvs' <- mapM tcIfaceLclId cvs
-    return $ PluginProv str $ mkDVarSet cvs'
 
 {-
 ************************************************************************

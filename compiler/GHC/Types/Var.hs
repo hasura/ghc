@@ -375,6 +375,9 @@ ppr_id_scope (LocalId NotExported) = text "lid"
 instance NamedThing Var where
   getName = varName
 
+instance NFData Var where
+  rnf v = v `seq` ()
+  
 instance Uniquable Var where
   getUnique = varUnique
 

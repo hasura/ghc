@@ -558,8 +558,8 @@ expandTypeSynonyms ty
       = substCoVar subst cv
     go_co subst (AxiomInstCo ax ind args)
       = mkAxiomInstCo ax ind (map (go_co subst) args)
-    go_co subst (UnivCo p r t1 t2)
-      = mkUnivCo (go_prov subst p) r (go subst t1) (go subst t2)
+    go_co subst co@(UnivCo { uco_lty = lty, uco_rty = rty })
+      = co { uco_lty = go subst lty, uco_rty = go subst rty }
     go_co subst (SymCo co)
       = mkSymCo (go_co subst co)
     go_co subst (TransCo co1 co2)
@@ -578,10 +578,6 @@ expandTypeSynonyms ty
       = AxiomRuleCo ax (map (go_co subst) cs)
     go_co _ (HoleCo h)
       = pprPanic "expandTypeSynonyms hit a hole" (ppr h)
-
-    go_prov subst (PhantomProv co)    = PhantomProv (go_co subst co)
-    go_prov subst (ProofIrrelProv co) = ProofIrrelProv (go_co subst co)
-    go_prov _     p@(PluginProv _ _)  = p
 
       -- the "False" and "const" are to accommodate the type of
       -- substForAllCoBndrUsing, which is general enough to
@@ -972,8 +968,12 @@ mapTyCoX (TyCoMapper { tcm_tyvar = tyvar
                                            <*> go_co env c1 <*> go_co env c2
     go_co !env (CoVarCo cv)               = covar env cv
     go_co !env (HoleCo hole)              = cohole env hole
-    go_co !env (UnivCo p r t1 t2)         = mkUnivCo <$> go_prov env p <*> pure r
-                                           <*> go_ty env t1 <*> go_ty env t2
+    go_co !env (UnivCo { uco_prov = p, uco_role = r
+                       , uco_lty = t1, uco_rty = t2, uco_cvs = cvs })
+                                          = mkUnivCo <$> pure p
+                                                     <*> go_fcvs env (dVarSetElems cvs)
+                                                     <*> pure r
+                                                     <*> go_ty env t1 <*> go_ty env t2
     go_co !env (SymCo co)                 = mkSymCo <$> go_co env co
     go_co !env (TransCo c1 c2)            = mkTransCo <$> go_co env c1 <*> go_co env c2
     go_co !env (AxiomRuleCo r cos)        = AxiomRuleCo r <$> go_cos env cos
@@ -1001,10 +1001,6 @@ mapTyCoX (TyCoMapper { tcm_tyvar = tyvar
            ; co' <- go_co env' co
            ; return $ mkForAllCo tv' visL visR kind_co' co' }
         -- See Note [Efficiency for ForAllCo case of mapTyCoX]
-
-    go_prov !env (PhantomProv co)    = PhantomProv <$> go_co env co
-    go_prov !env (ProofIrrelProv co) = ProofIrrelProv <$> go_co env co
-    go_prov !env (PluginProv s cvs)  = PluginProv s <$> go_fcvs env (dVarSetElems cvs)
 
     -- See Note [Use explicit recursion in mapTyCo]
     go_fcvs :: env -> [CoVar] -> m DTyCoVarSet

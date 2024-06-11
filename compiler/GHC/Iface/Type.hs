@@ -15,7 +15,6 @@ module GHC.Iface.Type (
 
         IfaceType(..), IfacePredType, IfaceKind, IfaceCoercion(..),
         IfaceMCoercion(..),
-        IfaceUnivCoProv(..),
         IfaceMult,
         IfaceTyCon(..),
         IfaceTyConInfo(..), mkIfaceTyConInfo,
@@ -76,7 +75,7 @@ import {-# SOURCE #-} GHC.Builtin.Types
                                  , liftedRepTyCon, liftedDataConTyCon
                                  , sumTyCon )
 import GHC.Core.Type ( isRuntimeRepTy, isMultiplicityTy, isLevityTy, funTyFlagTyCon )
-import GHC.Core.TyCo.Rep( CoSel )
+import GHC.Core.TyCo.Rep( CoSel, UnivCoProvenance(..) )
 import GHC.Core.TyCo.Compare( eqForAllVis )
 import GHC.Core.TyCon hiding ( pprPromotionQuote )
 import GHC.Core.Coercion.Axiom
@@ -482,7 +481,9 @@ data IfaceCoercion
        -- ^ There are only a fixed number of CoAxiomRules, so it suffices
        -- to use an IfaceLclName to distinguish them.
        -- See Note [Adding built-in type families] in GHC.Builtin.Types.Literals
-  | IfaceUnivCo       IfaceUnivCoProv Role IfaceType IfaceType
+  | IfaceUnivCo       UnivCoProvenance Role IfaceType IfaceType [IfLclName] [Var]
+       -- ^ Local covars and open (free) covars resp
+       -- See Note [Free TyVars and CoVars in IfaceType]
   | IfaceSymCo        IfaceCoercion
   | IfaceTransCo      IfaceCoercion IfaceCoercion
   | IfaceSelCo        CoSel IfaceCoercion
@@ -493,15 +494,7 @@ data IfaceCoercion
   | IfaceFreeCoVar    CoVar    -- ^ See Note [Free TyVars and CoVars in IfaceType]
   | IfaceHoleCo       CoVar    -- ^ See Note [Holes in IfaceCoercion]
   deriving (Eq, Ord)
-
-data IfaceUnivCoProv
-  = IfacePhantomProv IfaceCoercion
-  | IfaceProofIrrelProv IfaceCoercion
-  | IfacePluginProv String [IfLclName] [Var]
-    -- ^ Local covars and open (free) covars resp
-    -- See Note [Free TyVars and CoVars in IfaceType]
-  deriving (Eq, Ord)
-
+  -- Why Ord?  See Note [Ord instance of IfaceType]
 
 {- Note [Holes in IfaceCoercion]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -708,7 +701,9 @@ substIfaceType env ty
     go_co (IfaceCoVarCo cv)          = IfaceCoVarCo cv
     go_co (IfaceHoleCo cv)           = IfaceHoleCo cv
     go_co (IfaceAxiomInstCo a i cos) = IfaceAxiomInstCo a i (go_cos cos)
-    go_co (IfaceUnivCo prov r t1 t2) = IfaceUnivCo (go_prov prov) r (go t1) (go t2)
+    go_co (IfaceUnivCo prov r t1 t2 cvs fvs) = IfaceUnivCo prov r (go t1) (go t2) cvs fvs
+          -- Don't bother to substitute in free vars
+          -- See Note [Substitution on IfaceType]
     go_co (IfaceSymCo co)            = IfaceSymCo (go_co co)
     go_co (IfaceTransCo co1 co2)     = IfaceTransCo (go_co co1) (go_co co2)
     go_co (IfaceSelCo n co)          = IfaceSelCo n (go_co co)
@@ -719,10 +714,6 @@ substIfaceType env ty
     go_co (IfaceAxiomRuleCo n cos)   = IfaceAxiomRuleCo n (go_cos cos)
 
     go_cos = map go_co
-
-    go_prov (IfacePhantomProv co)    = IfacePhantomProv (go_co co)
-    go_prov (IfaceProofIrrelProv co) = IfaceProofIrrelProv (go_co co)
-    go_prov co@(IfacePluginProv _ _ _) = co
 
 substIfaceAppArgs :: IfaceTySubst -> IfaceAppArgs -> IfaceAppArgs
 substIfaceAppArgs env args
@@ -2012,9 +2003,9 @@ ppr_co _ (IfaceFreeCoVar covar) = ppr covar
 ppr_co _ (IfaceCoVarCo covar)   = ppr covar
 ppr_co _ (IfaceHoleCo covar)    = braces (ppr covar)
 
-ppr_co _ (IfaceUnivCo prov role ty1 ty2)
+ppr_co _ (IfaceUnivCo prov role ty1 ty2 cvs fvs)
   = text "Univ" <> (parens $
-      sep [ ppr role <+> pprIfaceUnivCoProv prov
+      sep [ ppr role <+> ppr prov <> ppr cvs <> ppr fvs
           , dcolon <+>  ppr ty1 <> comma <+> ppr ty2 ])
 
 ppr_co ctxt_prec (IfaceInstCo co ty)
@@ -2055,15 +2046,6 @@ ppr_role r = underscore <> pp_role
                     Nominal          -> char 'N'
                     Representational -> char 'R'
                     Phantom          -> char 'P'
-
-------------------
-pprIfaceUnivCoProv :: IfaceUnivCoProv -> SDoc
-pprIfaceUnivCoProv (IfacePhantomProv co)
-  = text "phantom" <+> pprParendIfaceCoercion co
-pprIfaceUnivCoProv (IfaceProofIrrelProv co)
-  = text "irrel" <+> pprParendIfaceCoercion co
-pprIfaceUnivCoProv (IfacePluginProv s cvs fcvs)
-  = hang (text "plugin") 2 (sep [doubleQuotes (text s), ppr cvs, ppr fcvs])
 
 -------------------
 instance Outputable IfLclName where
@@ -2388,12 +2370,15 @@ instance Binary IfaceCoercion where
           put_ bh a
           put_ bh b
           put_ bh c
-  put_ bh (IfaceUnivCo a b c d) = do
+  put_ bh (IfaceUnivCo a b c d cvs fcvs) = do
           putByte bh 9
           put_ bh a
           put_ bh b
           put_ bh c
           put_ bh d
+          assertPpr (null fcvs) (ppr cvs $$ ppr fcvs) $
+            -- See Note [Free TyVars and CoVars in IfaceType]
+            put_ bh cvs
   put_ bh (IfaceSymCo a) = do
           putByte bh 10
           put_ bh a
@@ -2467,7 +2452,8 @@ instance Binary IfaceCoercion where
                    b <- get bh
                    c <- get bh
                    d <- get bh
-                   return $ IfaceUnivCo a b c d
+                   cvs <- get bh
+                   return $ IfaceUnivCo a b c d cvs []
            10-> do a <- get bh
                    return $ IfaceSymCo a
            11-> do a <- get bh
@@ -2491,30 +2477,19 @@ instance Binary IfaceCoercion where
                    return $ IfaceAxiomRuleCo a b
            _ -> panic ("get IfaceCoercion " ++ show tag)
 
-instance Binary IfaceUnivCoProv where
-  put_ bh (IfacePhantomProv a) = do
-          putByte bh 1
-          put_ bh a
-  put_ bh (IfaceProofIrrelProv a) = do
-          putByte bh 2
-          put_ bh a
-  put_ bh (IfacePluginProv a cvs fcvs) = do
-          putByte bh 3
-          put_ bh a
-          -- See Note [Free TyVars and CoVars in IfaceType]
-          assertPpr (null fcvs) (ppr cvs $$ ppr fcvs) $
-            put_ bh cvs
+instance Binary UnivCoProvenance where
+  put_ bh PhantomProv         = putByte bh 1
+  put_ bh ProofIrrelProv = putByte bh 2
+  put_ bh (PluginProv a) = do { putByte bh 3
+                              ; put_ bh a }
 
   get bh = do
       tag <- getByte bh
       case tag of
-           1 -> do a <- get bh
-                   return $ IfacePhantomProv a
-           2 -> do a <- get bh
-                   return $ IfaceProofIrrelProv a
+           1 -> return PhantomProv
+           2 -> return ProofIrrelProv
            3 -> do a <- get bh
-                   cvs <- get bh
-                   return $ IfacePluginProv a cvs []
+                   return $ PluginProv a
            _ -> panic ("get IfaceUnivCoProv " ++ show tag)
 
 
@@ -2557,7 +2532,8 @@ instance NFData IfaceCoercion where
     IfaceCoVarCo f1 -> rnf f1
     IfaceAxiomInstCo f1 f2 f3 -> rnf f1 `seq` rnf f2 `seq` rnf f3
     IfaceAxiomRuleCo f1 f2 -> rnf f1 `seq` rnf f2
-    IfaceUnivCo f1 f2 f3 f4 -> rnf f1 `seq` f2 `seq` rnf f3 `seq` rnf f4
+    IfaceUnivCo f1 f2 f3 f4 cvs fcvs -> rnf f1 `seq` f2 `seq` rnf f3 `seq` rnf f4
+                                        `seq` rnf cvs `seq` rnf fcvs
     IfaceSymCo f1 -> rnf f1
     IfaceTransCo f1 f2 -> rnf f1 `seq` rnf f2
     IfaceSelCo f1 f2 -> rnf f1 `seq` rnf f2
@@ -2567,9 +2543,6 @@ instance NFData IfaceCoercion where
     IfaceSubCo f1 -> rnf f1
     IfaceFreeCoVar f1 -> f1 `seq` ()
     IfaceHoleCo f1 -> f1 `seq` ()
-
-instance NFData IfaceUnivCoProv where
-  rnf x = seq x ()
 
 instance NFData IfaceMCoercion where
   rnf x = seq x ()

@@ -15,6 +15,7 @@ import GHC.Tc.Utils.TcType   ( exactTyCoVarsOfType )
 import GHC.Core.TyCo.Rep
 import GHC.Core.TyCo.Subst
 import GHC.Core.TyCo.Compare( eqType, eqForAllVis )
+import GHC.Core.TyCo.FVs( coVarsOfCoDSet )
 import GHC.Core.Coercion
 import GHC.Core.Type as Type hiding( substTyVarBndr, substTy )
 import GHC.Core.TyCon
@@ -370,9 +371,9 @@ opt_co4 env sym rep r (AxiomInstCo con ind cos)
                                  cos)
       -- Note that the_co does *not* have sym pushed into it
 
-opt_co4 env sym rep r (UnivCo prov _r t1 t2)
-  = assert (r == _r )
-    opt_univ env sym prov (chooseRole rep r) t1 t2
+opt_co4 env sym rep r (UnivCo { uco_prov = prov, uco_lty = t1
+                              , uco_rty = t2, uco_cvs = cvs })
+  = opt_univ env sym prov cvs (chooseRole rep r) t1 t2
 
 opt_co4 env sym rep r (TransCo co1 co2)
                       -- sym (g `o` h) = sym h `o` sym g
@@ -527,7 +528,7 @@ in GHC.Core.Coercion.
 -- be a phantom, but the output sure will be.
 opt_phantom :: LiftingContext -> SymFlag -> Coercion -> NormalCo
 opt_phantom env sym co
-  = opt_univ env sym (PhantomProv (mkKindCo co)) Phantom ty1 ty2
+  = opt_univ env sym PhantomProv (coVarsOfCoDSet co) Phantom ty1 ty2
   where
     Pair ty1 ty2 = coercionKind co
 
@@ -562,17 +563,26 @@ See #19509.
 
  -}
 
-opt_univ :: LiftingContext -> SymFlag -> UnivCoProvenance -> Role
-         -> Type -> Type -> Coercion
-opt_univ env sym (PhantomProv h) _r ty1 ty2
-  | sym       = mkPhantomCo h' ty2' ty1'
-  | otherwise = mkPhantomCo h' ty1' ty2'
+opt_univ :: LiftingContext -> SymFlag -> UnivCoProvenance
+         -> DCoVarSet    -- Fully substituted by liftingContextSubst
+         -> Role -> Type -> Type -> Coercion
+opt_univ env sym prov cvs role ty1 ty2
+  | sym       = opt_univ1 env prov cvs' role ty2 ty1
+  | otherwise = opt_univ1 env prov cvs' role ty1 ty2
   where
-    h' = opt_co4 env sym False Nominal h
+   cvs' = substDCoVarSet (liftingContextSubst env) cvs
+
+opt_univ1 :: LiftingContext -> UnivCoProvenance
+          -> DCoVarSet    -- Fully substituted by liftingContextSubst
+          -> Role -> Type -> Type
+          -> Coercion
+opt_univ1 env PhantomProv cvs' _r ty1 ty2
+  = mkUnivCo PhantomProv cvs' Phantom ty1' ty2'
+  where
     ty1' = substTy (lcSubstLeft  env) ty1
     ty2' = substTy (lcSubstRight env) ty2
 
-opt_univ env sym prov role oty1 oty2
+opt_univ1 env prov cvs' role oty1 oty2
   | Just (tc1, tys1) <- splitTyConApp_maybe oty1
   , Just (tc2, tys2) <- splitTyConApp_maybe oty2
   , tc1 == tc2
@@ -581,8 +591,8 @@ opt_univ env sym prov role oty1 oty2
       -- NB: prov must not be the two interesting ones (ProofIrrel & Phantom);
       -- Phantom is already taken care of, and ProofIrrel doesn't relate tyconapps
   = let roles    = tyConRoleListX role tc1
-        arg_cos  = zipWith3 (mkUnivCo prov') roles tys1 tys2
-        arg_cos' = zipWith (opt_co4 env sym False) roles arg_cos
+        arg_cos  = zipWith3 (mkUnivCo prov cvs') roles tys1 tys2
+        arg_cos' = zipWith (opt_co4 env False False) roles arg_cos
     in
     mkTyConAppCo role tc1 arg_cos'
 
@@ -595,14 +605,13 @@ opt_univ env sym prov role oty1 oty2
       -- NB: prov isn't interesting here either
   = let k1   = tyVarKind tv1
         k2   = tyVarKind tv2
-        eta  = mkUnivCo prov' Nominal k1 k2
+        eta  = mkUnivCo prov cvs' Nominal k1 k2
           -- eta gets opt'ed soon, but not yet.
         ty2' = substTyWith [tv2] [TyVarTy tv1 `mkCastTy` eta] ty2
 
-        (env', tv1', eta') = optForAllCoBndr env sym tv1 eta
-        !(vis1', vis2') = swapSym sym (vis1, vis2)
+        (env', tv1', eta') = optForAllCoBndr env False tv1 eta
     in
-    mkForAllCo tv1' vis1' vis2' eta' (opt_univ env' sym prov' role ty1 ty2')
+    mkForAllCo tv1' vis1 vis2 eta' (opt_univ1 env' prov cvs' role ty1 ty2')
 
   | Just (Bndr cv1 vis1, ty1) <- splitForAllForAllTyBinder_maybe oty1
   , isCoVar cv1
@@ -612,7 +621,7 @@ opt_univ env sym prov role oty1 oty2
   = let k1    = varType cv1
         k2    = varType cv2
         r'    = coVarRole cv1
-        eta   = mkUnivCo prov' Nominal k1 k2
+        eta   = mkUnivCo prov cvs' Nominal k1 k2
         eta_d = downgradeRole r' Nominal eta
           -- eta gets opt'ed soon, but not yet.
         n_co  = (mkSymCo $ mkSelCo (SelTyCon 2 r') eta_d) `mkTransCo`
@@ -620,23 +629,15 @@ opt_univ env sym prov role oty1 oty2
                 (mkSelCo (SelTyCon 3 r') eta_d)
         ty2'  = substTyWithCoVars [cv2] [n_co] ty2
 
-        (env', cv1', eta') = optForAllCoBndr env sym cv1 eta
-        !(vis1', vis2') = swapSym sym (vis1, vis2)
+        (env', cv1', eta') = optForAllCoBndr env False cv1 eta
     in
-    mkForAllCo cv1' vis1' vis2' eta' (opt_univ env' sym prov' role ty1 ty2')
+    mkForAllCo cv1' vis1 vis2 eta' (opt_univ1 env' prov cvs' role ty1 ty2')
 
   | otherwise
   = let ty1 = substTyUnchecked (lcSubstLeft  env) oty1
         ty2 = substTyUnchecked (lcSubstRight env) oty2
-        (a, b) | sym       = (ty2, ty1)
-               | otherwise = (ty1, ty2)
     in
-    mkUnivCo prov' role a b
-
-  where
-    prov' = case prov of
-      ProofIrrelProv kco -> ProofIrrelProv $ opt_co4_wrap env sym False Nominal kco
-      PluginProv s cvs   -> PluginProv s $ substDCoVarSet (liftingContextSubst env) cvs
+    mkUnivCo prov cvs' role ty1 ty2
 
 -------------
 opt_transList :: HasDebugCallStack => InScopeSet -> [NormalCo] -> [NormalCo] -> [NormalCo]
@@ -722,21 +723,13 @@ opt_trans_rule is in_co1@(InstCo co1 ty1) in_co2@(InstCo co2 ty2)
   = fireTransRule "TrPushInst" in_co1 in_co2 $
     mkInstCo (opt_trans is co1 co2) ty1
 
-opt_trans_rule is in_co1@(UnivCo p1 r1 tyl1 _tyr1)
-                  in_co2@(UnivCo p2 r2 _tyl2 tyr2)
-  | Just prov' <- opt_trans_prov p1 p2
+opt_trans_rule _
+    in_co1@(UnivCo { uco_prov = p1, uco_role = r1, uco_lty = tyl1, uco_cvs = cvs1 })
+    in_co2@(UnivCo { uco_prov = p2, uco_role = r2, uco_rty = tyr2, uco_cvs = cvs2 })
+  | p1 == p2    -- If the provenances are different, opt'ing will be very confusing
   = assert (r1 == r2) $
     fireTransRule "UnivCo" in_co1 in_co2 $
-    mkUnivCo prov' r1 tyl1 tyr2
-  where
-    -- if the provenances are different, opt'ing will be very confusing
-    opt_trans_prov (PhantomProv kco1)    (PhantomProv kco2)
-      = Just $ PhantomProv $ opt_trans is kco1 kco2
-    opt_trans_prov (ProofIrrelProv kco1) (ProofIrrelProv kco2)
-      = Just $ ProofIrrelProv $ opt_trans is kco1 kco2
-    opt_trans_prov (PluginProv str1 cvs1) (PluginProv str2 cvs2)
-      | str1 == str2 = Just (PluginProv str1 (cvs1 `unionDVarSet` cvs2))
-    opt_trans_prov _ _ = Nothing
+    mkUnivCo p1 (cvs1 `unionDVarSet` cvs2) r1 tyl1 tyr2
 
 -- Push transitivity down through matching top-level constructors.
 opt_trans_rule is in_co1@(TyConAppCo r1 tc1 cos1) in_co2@(TyConAppCo r2 tc2 cos2)

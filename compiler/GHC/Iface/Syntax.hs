@@ -1783,8 +1783,10 @@ freeNamesIfCoercion (IfaceCoVarCo _)   = emptyNameSet
 freeNamesIfCoercion (IfaceHoleCo _)    = emptyNameSet
 freeNamesIfCoercion (IfaceAxiomInstCo ax _ cos)
   = unitNameSet ax &&& fnList freeNamesIfCoercion cos
-freeNamesIfCoercion (IfaceUnivCo p _ t1 t2)
-  = freeNamesIfProv p &&& freeNamesIfType t1 &&& freeNamesIfType t2
+freeNamesIfCoercion (IfaceUnivCo _ _ t1 t2 _ _)
+  = freeNamesIfType t1 &&& freeNamesIfType t2
+    -- Ignoring free-var fields, which are all local,
+    -- and don't contribute to dependency analysis
 freeNamesIfCoercion (IfaceSymCo c)
   = freeNamesIfCoercion c
 freeNamesIfCoercion (IfaceTransCo c1 c2)
@@ -1802,11 +1804,6 @@ freeNamesIfCoercion (IfaceSubCo co)
 freeNamesIfCoercion (IfaceAxiomRuleCo _ax cos)
   -- the axiom is just a string, so we don't count it as a name.
   = fnList freeNamesIfCoercion cos
-
-freeNamesIfProv :: IfaceUnivCoProv -> NameSet
-freeNamesIfProv (IfacePhantomProv co)    = freeNamesIfCoercion co
-freeNamesIfProv (IfaceProofIrrelProv co) = freeNamesIfCoercion co
-freeNamesIfProv (IfacePluginProv _ _ _)  = emptyNameSet
 
 freeNamesIfVarBndr :: VarBndr IfaceBndr vis -> NameSet
 freeNamesIfVarBndr (Bndr bndr _) = freeNamesIfBndr bndr

@@ -2467,18 +2467,22 @@ lintCoercion co@(FunCo { fco_role = r, fco_afl = afl, fco_afr = afr
                               , text "res_co:" <+> ppr co2 ])
 
 -- See Note [Bad unsafe coercion]
-lintCoercion co@(UnivCo prov r ty1 ty2)
+lintCoercion co@(UnivCo { uco_role = r
+                        , uco_lty = ty1, uco_rty = ty2, uco_cvs = cvs })
   = do { ty1' <- lintType ty1
        ; ty2' <- lintType ty2
+       ; subst <- getSubst
+       ; mapM_ (checkTyCoVarInScope subst) (dVarSetElems cvs)
+               -- Don't bother to return substituted fvs;
+               -- they don't matter to Lint
+
        ; let k1 = typeKind ty1'
              k2 = typeKind ty2'
-       ; prov' <- lint_prov k1 k2 prov
-
        ; when (r /= Phantom && isTYPEorCONSTRAINT k1
                             && isTYPEorCONSTRAINT k2)
               (checkTypes ty1 ty2)
 
-       ; return (UnivCo prov' r ty1' ty2') }
+       ; return (co { uco_lty = ty1', uco_rty = ty2' }) }
    where
      report s = hang (text $ "Unsafe coercion: " ++ s)
                      2 (vcat [ text "From:" <+> ppr ty1
@@ -2520,32 +2524,6 @@ lintCoercion co@(UnivCo prov r ty1 ty2)
                 Just False -> addWarnL (report "between float and integral values")
                 _          -> return ()
             }
-
-     lint_prov k1 k2 (PhantomProv kco)
-       = do { kco' <- lintStarCoercion kco
-            ; lintRole co Phantom r
-            ; check_kinds kco' k1 k2
-            ; return (PhantomProv kco') }
-
-     lint_prov k1 k2 (ProofIrrelProv kco)
-       = do { lintL (isCoercionTy ty1) (mkBadProofIrrelMsg ty1 co)
-            ; lintL (isCoercionTy ty2) (mkBadProofIrrelMsg ty2 co)
-            ; kco' <- lintStarCoercion kco
-            ; check_kinds kco k1 k2
-            ; return (ProofIrrelProv kco') }
-
-     lint_prov _ _ (PluginProv s cvs)
-        = do { subst <- getSubst
-             ; mapM_ (checkTyCoVarInScope subst) (dVarSetElems cvs)
-               -- Don't bother to return substituted fvs;
-               -- they don't matter to Lint
-             ; return (PluginProv s cvs) }
-
-     check_kinds kco k1 k2
-       = do { let Pair k1' k2' = coercionKind kco
-            ; ensureEqTys k1 k1' (mkBadUnivCoMsg CLeft  co)
-            ; ensureEqTys k2 k2' (mkBadUnivCoMsg CRight co) }
-
 
 lintCoercion (SymCo co)
   = do { co' <- lintCoercion co
@@ -3787,17 +3765,6 @@ mk_cast_err thing_str co_str pp_thing co from_ty thing_ty
     from_msg     = text "From-" <> co_msg
     enclosed_msg = text "enclosed" <+> text thing_str
 
-mkBadUnivCoMsg :: LeftOrRight -> Coercion -> SDoc
-mkBadUnivCoMsg lr co
-  = text "Kind mismatch on the" <+> pprLeftOrRight lr <+>
-    text "side of a UnivCo:" <+> ppr co
-
-mkBadProofIrrelMsg :: Type -> Coercion -> SDoc
-mkBadProofIrrelMsg ty co
-  = hang (text "Found a non-coercion in a proof-irrelevance UnivCo:")
-       2 (vcat [ text "type:" <+> ppr ty
-               , text "co:" <+> ppr co ])
-
 mkBadTyVarMsg :: Var -> SDoc
 mkBadTyVarMsg tv
   = text "Non-tyvar used in TyVarTy:"
@@ -3861,10 +3828,6 @@ mkBadJoinPointRuleMsg bndr join_arity rule
          , text "Var:" <+> ppr bndr
          , text "Join arity:" <+> ppr join_arity
          , text "Rule:" <+> ppr rule ]
-
-pprLeftOrRight :: LeftOrRight -> SDoc
-pprLeftOrRight CLeft  = text "left"
-pprLeftOrRight CRight = text "right"
 
 dupVars :: [NonEmpty Var] -> SDoc
 dupVars vars

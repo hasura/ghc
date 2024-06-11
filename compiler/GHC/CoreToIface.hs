@@ -299,9 +299,13 @@ toIfaceCoercionX fr co
     go (SubCo co)           = IfaceSubCo (go co)
     go (AxiomRuleCo co cs)  = IfaceAxiomRuleCo (mkIfLclName (coaxrName co)) (map go cs)
     go (AxiomInstCo c i cs) = IfaceAxiomInstCo (coAxiomName c) i (map go cs)
-    go (UnivCo p r t1 t2)   = IfaceUnivCo (go_prov p) r
-                                          (toIfaceTypeX fr t1)
-                                          (toIfaceTypeX fr t2)
+    go (UnivCo { uco_prov = p, uco_role = r, uco_lty = t1, uco_rty = t2, uco_cvs = cvs })
+        = IfaceUnivCo p r
+                      (toIfaceTypeX fr t1) (toIfaceTypeX fr t2)
+                      (map toIfaceCoVar bound_cvs) free_cvs
+        where
+          (free_cvs, bound_cvs) = partition (`elemVarSet` fr) (dVarSetElems cvs)
+
     go co@(TyConAppCo r tc cos)
       =  assertPpr (isNothing (tyConAppFunCo_maybe r tc cos)) (ppr co) $
          IfaceTyConAppCo r (toIfaceTyCon tc) (map go cos)
@@ -317,13 +321,6 @@ toIfaceCoercionX fr co
                       (toIfaceCoercionX fr' co)
                           where
                             fr' = fr `delVarSet` tv
-
-    go_prov :: UnivCoProvenance -> IfaceUnivCoProv
-    go_prov (PhantomProv co)     = IfacePhantomProv (go co)
-    go_prov (ProofIrrelProv co)  = IfaceProofIrrelProv (go co)
-    go_prov (PluginProv str cvs) = IfacePluginProv str (map toIfaceCoVar bound_cvs) free_cvs
-      where
-        (free_cvs, bound_cvs) = partition (`elemVarSet` fr) (dVarSetElems cvs)
 
 toIfaceTcArgs :: TyCon -> [Type] -> IfaceAppArgs
 toIfaceTcArgs = toIfaceTcArgsX emptyVarSet

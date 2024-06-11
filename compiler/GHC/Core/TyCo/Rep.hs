@@ -60,7 +60,7 @@ module GHC.Core.TyCo.Rep (
         TyCoFolder(..), foldTyCo, noView,
 
         -- * Sizes
-        typeSize, typesSize, coercionSize, provSize,
+        typeSize, typesSize, coercionSize,
 
         -- * Multiplicities
         Scaled(..), scaledMult, scaledThing, mapScaledType, Mult
@@ -922,8 +922,15 @@ data Coercion
     -- The number coercions should match exactly the expectations
     -- of the CoAxiomRule (i.e., the rule is fully saturated).
 
-  | UnivCo UnivCoProvenance Role Type Type
-      -- :: _ -> "e" -> _ -> _ -> e
+  | UnivCo { uco_prov         :: UnivCoProvenance
+           , uco_role         :: Role
+           , uco_lty, uco_rty :: Type
+           , uco_cvs          :: !DCoVarSet  -- Free coercion variables
+               --   The set must contain all the in-scope coercion variables
+               --   that the the proof represented by the coercion makes use of.
+               --   See Note [The importance of tracking free coercion variables].
+    }
+    -- Of kind (lty ~role rty)
 
   | SymCo Coercion             -- :: e -> e
   | TransCo Coercion Coercion  -- :: e -> e -> e
@@ -1550,26 +1557,27 @@ role and kind, which is done in the UnivCo constructor.
 -- that they don't tell you what types they coercion between. (That info
 -- is in the 'UnivCo' constructor of 'Coercion'.
 data UnivCoProvenance
-  = PhantomProv KindCoercion -- ^ See Note [Phantom coercions]. Only in Phantom
-                             -- roled coercions
+  = PhantomProv    -- ^ See Note [Phantom coercions]. Only in Phantom
+                   -- roled coercions
 
-  | ProofIrrelProv KindCoercion  -- ^ From the fact that any two coercions are
-                                 --   considered equivalent. See Note [ProofIrrelProv].
-                                 -- Can be used in Nominal or Representational coercions
+  | ProofIrrelProv -- ^ From the fact that any two coercions are
+                   --   considered equivalent. See Note [ProofIrrelProv].
+                   -- Can be used in Nominal or Representational coercions
 
-  | PluginProv String !DCoVarSet
+  | PluginProv String
       -- ^ From a plugin, which asserts that this coercion is sound.
       --   The string and the variable set are for the use by the plugin.
-      --   The set must contain all the in-scope coercion variables
-      --   that the the proof represented by the coercion makes use of.
-      --   See Note [The importance of tracking free coercion variables].
 
-  deriving Data.Data
+  deriving (Eq, Ord, Data.Data)
+  -- Why Ord?  See Note [Ord instance of IfaceType] in GHC.Iface.Type
 
 instance Outputable UnivCoProvenance where
-  ppr (PhantomProv _)      = text "(phantom)"
-  ppr (ProofIrrelProv _)   = text "(proof irrel.)"
-  ppr (PluginProv str cvs) = parens (text "plugin" <+> brackets (text str) <+> ppr cvs)
+  ppr PhantomProv      = text "(phantom)"
+  ppr ProofIrrelProv   = text "(proof irrel.)"
+  ppr (PluginProv str) = parens (text "plugin" <+> brackets (text str))
+
+instance NFData UnivCoProvenance where
+  rnf p = p `seq` ()
 
 -- | A coercion to be filled in by the type-checker. See Note [Coercion holes]
 data CoercionHole
@@ -1942,8 +1950,9 @@ foldTyCo (TyCoFolder { tcf_view       = view
     go_co env (CoVarCo cv)             = covar env cv
     go_co env (AxiomInstCo _ _ args)   = go_cos env args
     go_co env (HoleCo hole)            = cohole env hole
-    go_co env (UnivCo p _ t1 t2)       = go_prov env p `mappend` go_ty env t1
-                                                       `mappend` go_ty env t2
+    go_co env (UnivCo { uco_lty = t1, uco_rty = t2, uco_cvs = cvs })
+                                       = go_ty env t1 `mappend` go_ty env t2
+                                         `mappend` go_cvs env cvs
     go_co env (SymCo co)               = go_co env co
     go_co env (TransCo c1 c2)          = go_co env c1 `mappend` go_co env c2
     go_co env (AxiomRuleCo _ cos)      = go_cos env cos
@@ -1961,10 +1970,6 @@ foldTyCo (TyCoFolder { tcf_view       = view
                           `mappend` go_co env' co
       where
         env' = tycobinder env tv Inferred
-
-    go_prov env (PhantomProv co)    = go_co env co
-    go_prov env (ProofIrrelProv co) = go_co env co
-    go_prov _   (PluginProv _ cvs)  = go_cvs env cvs
 
     -- See Note [Use explicit recursion in foldTyCo]
     go_cvs env cvs = foldr (add_one env) mempty (dVarSetElems cvs)
@@ -2021,7 +2026,7 @@ coercionSize (FunCo _ _ _ w c1 c2) = 1 + coercionSize c1 + coercionSize c2
 coercionSize (CoVarCo _)         = 1
 coercionSize (HoleCo _)          = 1
 coercionSize (AxiomInstCo _ _ args) = 1 + sum (map coercionSize args)
-coercionSize (UnivCo p _ t1 t2)  = 1 + provSize p + typeSize t1 + typeSize t2
+coercionSize (UnivCo { uco_lty = t1, uco_rty = t2 })  = 1 + typeSize t1 + typeSize t2
 coercionSize (SymCo co)          = 1 + coercionSize co
 coercionSize (TransCo co1 co2)   = 1 + coercionSize co1 + coercionSize co2
 coercionSize (SelCo _ co)        = 1 + coercionSize co
@@ -2030,11 +2035,6 @@ coercionSize (InstCo co arg)     = 1 + coercionSize co + coercionSize arg
 coercionSize (KindCo co)         = 1 + coercionSize co
 coercionSize (SubCo co)          = 1 + coercionSize co
 coercionSize (AxiomRuleCo _ cs)  = 1 + sum (map coercionSize cs)
-
-provSize :: UnivCoProvenance -> Int
-provSize (PhantomProv co)    = 1 + coercionSize co
-provSize (ProofIrrelProv co) = 1 + coercionSize co
-provSize (PluginProv _ _)    = 1
 
 {-
 ************************************************************************
