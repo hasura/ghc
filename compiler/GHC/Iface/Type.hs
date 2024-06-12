@@ -481,9 +481,7 @@ data IfaceCoercion
        -- ^ There are only a fixed number of CoAxiomRules, so it suffices
        -- to use an IfaceLclName to distinguish them.
        -- See Note [Adding built-in type families] in GHC.Builtin.Types.Literals
-  | IfaceUnivCo       UnivCoProvenance Role IfaceType IfaceType [IfLclName] [Var]
-       -- ^ Local covars and open (free) covars resp
-       -- See Note [Free TyVars and CoVars in IfaceType]
+  | IfaceUnivCo       UnivCoProvenance Role IfaceType IfaceType [IfaceCoercion]
   | IfaceSymCo        IfaceCoercion
   | IfaceTransCo      IfaceCoercion IfaceCoercion
   | IfaceSelCo        CoSel IfaceCoercion
@@ -701,9 +699,7 @@ substIfaceType env ty
     go_co (IfaceCoVarCo cv)          = IfaceCoVarCo cv
     go_co (IfaceHoleCo cv)           = IfaceHoleCo cv
     go_co (IfaceAxiomInstCo a i cos) = IfaceAxiomInstCo a i (go_cos cos)
-    go_co (IfaceUnivCo prov r t1 t2 cvs fvs) = IfaceUnivCo prov r (go t1) (go t2) cvs fvs
-          -- Don't bother to substitute in free vars
-          -- See Note [Substitution on IfaceType]
+    go_co (IfaceUnivCo p r t1 t2 ds) = IfaceUnivCo p r (go t1) (go t2) (go_cos ds)
     go_co (IfaceSymCo co)            = IfaceSymCo (go_co co)
     go_co (IfaceTransCo co1 co2)     = IfaceTransCo (go_co co1) (go_co co2)
     go_co (IfaceSelCo n co)          = IfaceSelCo n (go_co co)
@@ -2003,9 +1999,9 @@ ppr_co _ (IfaceFreeCoVar covar) = ppr covar
 ppr_co _ (IfaceCoVarCo covar)   = ppr covar
 ppr_co _ (IfaceHoleCo covar)    = braces (ppr covar)
 
-ppr_co _ (IfaceUnivCo prov role ty1 ty2 cvs fvs)
+ppr_co _ (IfaceUnivCo prov role ty1 ty2 ds)
   = text "Univ" <> (parens $
-      sep [ ppr role <+> ppr prov <> ppr cvs <> ppr fvs
+      sep [ ppr role <+> ppr prov <> ppr ds
           , dcolon <+>  ppr ty1 <> comma <+> ppr ty2 ])
 
 ppr_co ctxt_prec (IfaceInstCo co ty)
@@ -2370,15 +2366,13 @@ instance Binary IfaceCoercion where
           put_ bh a
           put_ bh b
           put_ bh c
-  put_ bh (IfaceUnivCo a b c d cvs fcvs) = do
+  put_ bh (IfaceUnivCo a b c d deps) = do
           putByte bh 9
           put_ bh a
           put_ bh b
           put_ bh c
           put_ bh d
-          assertPpr (null fcvs) (ppr cvs $$ ppr fcvs) $
-            -- See Note [Free TyVars and CoVars in IfaceType]
-            put_ bh cvs
+          put_ bh deps
   put_ bh (IfaceSymCo a) = do
           putByte bh 10
           put_ bh a
@@ -2452,8 +2446,8 @@ instance Binary IfaceCoercion where
                    b <- get bh
                    c <- get bh
                    d <- get bh
-                   cvs <- get bh
-                   return $ IfaceUnivCo a b c d cvs []
+                   deps <- get bh
+                   return $ IfaceUnivCo a b c d deps
            10-> do a <- get bh
                    return $ IfaceSymCo a
            11-> do a <- get bh
@@ -2516,8 +2510,7 @@ instance NFData IfaceCoercion where
     IfaceCoVarCo f1 -> rnf f1
     IfaceAxiomInstCo f1 f2 f3 -> rnf f1 `seq` rnf f2 `seq` rnf f3
     IfaceAxiomRuleCo f1 f2 -> rnf f1 `seq` rnf f2
-    IfaceUnivCo f1 f2 f3 f4 cvs fcvs -> rnf f1 `seq` f2 `seq` rnf f3 `seq` rnf f4
-                                        `seq` rnf cvs `seq` rnf fcvs
+    IfaceUnivCo f1 f2 f3 f4 deps -> rnf f1 `seq` f2 `seq` rnf f3 `seq` rnf f4 `seq` rnf deps
     IfaceSymCo f1 -> rnf f1
     IfaceTransCo f1 f2 -> rnf f1 `seq` rnf f2
     IfaceSelCo f1 f2 -> rnf f1 `seq` rnf f2

@@ -75,18 +75,10 @@ opt_trans_rule is in_co1@(InstCo co1 ty1) in_co2@(InstCo co2 ty2)
   | ty1 `eqCoercion` ty2
   , co1 `compatible_co` co2 = undefined
 
-opt_trans_rule is in_co1@(UnivCo p1 r1 tyl1 _tyr1 _fvs1)
-                  in_co2@(UnivCo p2 r2 _tyl2 tyr2 _fvs2)
-  | Just prov' <- opt_trans_prov p1 p2 = undefined
-  where
+opt_trans_rule is (UnivCo { uco_prov = p1 })
+                  (UnivCo ( uco_prov = p2 })
+  | p1 == p2 = undefined
     -- if the provenances are different, opt'ing will be very confusing
-    opt_trans_prov PhantomProv PhantomProv
-      = Just $ PhantomProv
-    opt_trans_prov ProofIrrelProv ProofIrrelProv
-      = Just $ ProofIrrelProv
-    opt_trans_prov (PluginProv str1 _) (PluginProv str2 _)
-      | str1 == str2 = Just p1
-    opt_trans_prov _ _ = Nothing
 
 -- Push transitivity down through matching top-level constructors.
 opt_trans_rule is in_co1@(TyConAppCo r1 tc1 cos1)

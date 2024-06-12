@@ -15,7 +15,6 @@ import GHC.Tc.Utils.TcType   ( exactTyCoVarsOfType )
 import GHC.Core.TyCo.Rep
 import GHC.Core.TyCo.Subst
 import GHC.Core.TyCo.Compare( eqType, eqForAllVis )
-import GHC.Core.TyCo.FVs( coVarsOfCoDSet )
 import GHC.Core.Coercion
 import GHC.Core.Type as Type hiding( substTyVarBndr, substTy )
 import GHC.Core.TyCon
@@ -372,8 +371,8 @@ opt_co4 env sym rep r (AxiomInstCo con ind cos)
       -- Note that the_co does *not* have sym pushed into it
 
 opt_co4 env sym rep r (UnivCo { uco_prov = prov, uco_lty = t1
-                              , uco_rty = t2, uco_cvs = cvs })
-  = opt_univ env sym prov cvs (chooseRole rep r) t1 t2
+                              , uco_rty = t2, uco_deps = deps })
+  = opt_univ env sym prov deps (chooseRole rep r) t1 t2
 
 opt_co4 env sym rep r (TransCo co1 co2)
                       -- sym (g `o` h) = sym h `o` sym g
@@ -528,7 +527,7 @@ in GHC.Core.Coercion.
 -- be a phantom, but the output sure will be.
 opt_phantom :: LiftingContext -> SymFlag -> Coercion -> NormalCo
 opt_phantom env sym co
-  = opt_univ env sym PhantomProv (coVarsOfCoDSet co) Phantom ty1 ty2
+  = opt_univ env sym PhantomProv [mkKindCo co] Phantom ty1 ty2
   where
     Pair ty1 ty2 = coercionKind co
 
@@ -564,20 +563,19 @@ See #19509.
  -}
 
 opt_univ :: LiftingContext -> SymFlag -> UnivCoProvenance
-         -> DCoVarSet    -- Fully substituted by liftingContextSubst
+         -> [Coercion]
          -> Role -> Type -> Type -> Coercion
-opt_univ env sym prov cvs role ty1 ty2
-  | sym       = opt_univ1 env prov cvs' role ty2 ty1
-  | otherwise = opt_univ1 env prov cvs' role ty1 ty2
-  where
-   cvs' = substDCoVarSet (liftingContextSubst env) cvs
+opt_univ env sym prov deps role ty1 ty2
+  = let ty1'  = substTyUnchecked (lcSubstLeft  env) ty1
+        ty2'  = substTyUnchecked (lcSubstRight env) ty2
+        deps' = map (opt_co1 env sym) deps
+        (ty1'', ty2'') = swapSym sym (ty1', ty2')
+    in
+    mkUnivCo prov deps' role ty1'' ty2''
 
-opt_univ1 :: LiftingContext -> UnivCoProvenance
-          -> DCoVarSet    -- Fully substituted by liftingContextSubst
-          -> Role -> Type -> Type
-          -> Coercion
-opt_univ1 env PhantomProv cvs' _r ty1 ty2
-  = mkUnivCo PhantomProv cvs' Phantom ty1' ty2'
+{-
+opt_univ env PhantomProv cvs _r ty1 ty2
+  = mkUnivCo PhantomProv cvs Phantom ty1' ty2'
   where
     ty1' = substTy (lcSubstLeft  env) ty1
     ty2' = substTy (lcSubstRight env) ty2
@@ -638,6 +636,7 @@ opt_univ1 env prov cvs' role oty1 oty2
         ty2 = substTyUnchecked (lcSubstRight env) oty2
     in
     mkUnivCo prov cvs' role ty1 ty2
+-}
 
 -------------
 opt_transList :: HasDebugCallStack => InScopeSet -> [NormalCo] -> [NormalCo] -> [NormalCo]
@@ -724,12 +723,12 @@ opt_trans_rule is in_co1@(InstCo co1 ty1) in_co2@(InstCo co2 ty2)
     mkInstCo (opt_trans is co1 co2) ty1
 
 opt_trans_rule _
-    in_co1@(UnivCo { uco_prov = p1, uco_role = r1, uco_lty = tyl1, uco_cvs = cvs1 })
-    in_co2@(UnivCo { uco_prov = p2, uco_role = r2, uco_rty = tyr2, uco_cvs = cvs2 })
+    in_co1@(UnivCo { uco_prov = p1, uco_role = r1, uco_lty = tyl1, uco_deps = deps1 })
+    in_co2@(UnivCo { uco_prov = p2, uco_role = r2, uco_rty = tyr2, uco_deps = deps2 })
   | p1 == p2    -- If the provenances are different, opt'ing will be very confusing
   = assert (r1 == r2) $
     fireTransRule "UnivCo" in_co1 in_co2 $
-    mkUnivCo p1 (cvs1 `unionDVarSet` cvs2) r1 tyl1 tyr2
+    mkUnivCo p1 (deps1 ++ deps2) r1 tyl1 tyr2
 
 -- Push transitivity down through matching top-level constructors.
 opt_trans_rule is in_co1@(TyConAppCo r1 tc1 cos1) in_co2@(TyConAppCo r2 tc2 cos2)

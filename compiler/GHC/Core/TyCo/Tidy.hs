@@ -345,7 +345,7 @@ tidyCo env co
     go (AxiomInstCo con ind cos) = AxiomInstCo con ind $! strictMap go cos
     go co@(UnivCo { uco_lty = t1, uco_rty = t2 })
                              = co { uco_lty = tidyType env t1, uco_rty = tidyType env t2 }
-                               -- Don't bother to tidy the uco_cvs field
+                               -- Don't bother to tidy the uco_deps field
     go (SymCo co)            = SymCo $! go co
     go (TransCo co1 co2)     = (TransCo $! go co1) $! go co2
     go (SelCo d co)          = SelCo d $! go co

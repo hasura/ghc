@@ -878,8 +878,7 @@ subst_co subst co
     go :: Coercion -> Coercion
     go (Refl ty)             = mkNomReflCo $! (go_ty ty)
     go (GRefl r ty mco)      = (mkGReflCo r $! (go_ty ty)) $! (go_mco mco)
-    go (TyConAppCo r tc args)= let args' = map go args
-                               in  args' `seqList` mkTyConAppCo r tc args'
+    go (TyConAppCo r tc args)= mkTyConAppCo r tc $! go_cos args
     go (AppCo co arg)        = (mkAppCo $! go co) $! go arg
     go (ForAllCo tv visL visR kind_co co)
       = case substForAllCoBndrUnchecked subst tv kind_co of
@@ -889,8 +888,8 @@ subst_co subst co
     go (CoVarCo cv)          = substCoVar subst cv
     go (AxiomInstCo con ind cos) = mkAxiomInstCo con ind $! map go cos
     go (UnivCo { uco_prov = p, uco_role = r
-               , uco_lty = t1, uco_rty = t2, uco_cvs = cvs })
-                             = ((((mkUnivCo $! p) $! go_cvs cvs) $! r) $!
+               , uco_lty = t1, uco_rty = t2, uco_deps = deps })
+                             = ((((mkUnivCo $! p) $! go_cos deps) $! r) $!
                                   (go_ty t1)) $! (go_ty t2)
     go (SymCo co)            = mkSymCo $! (go co)
     go (TransCo co1 co2)     = (mkTransCo $! (go co1)) $! (go co2)
@@ -903,7 +902,8 @@ subst_co subst co
                                 in cs1 `seqList` AxiomRuleCo c cs1
     go (HoleCo h)            = HoleCo $! go_hole h
 
-    go_cvs cvs = substDCoVarSet subst cvs
+    go_cos cos = let cos' = map go cos
+                 in cos' `seqList` cos'
 
     -- See Note [Substituting in a coercion hole]
     go_hole h@(CoercionHole { ch_co_var = cv })

@@ -969,9 +969,9 @@ mapTyCoX (TyCoMapper { tcm_tyvar = tyvar
     go_co !env (CoVarCo cv)               = covar env cv
     go_co !env (HoleCo hole)              = cohole env hole
     go_co !env (UnivCo { uco_prov = p, uco_role = r
-                       , uco_lty = t1, uco_rty = t2, uco_cvs = cvs })
+                       , uco_lty = t1, uco_rty = t2, uco_deps = deps })
                                           = mkUnivCo <$> pure p
-                                                     <*> go_fcvs env (dVarSetElems cvs)
+                                                     <*> go_cos env deps
                                                      <*> pure r
                                                      <*> go_ty env t1 <*> go_ty env t2
     go_co !env (SymCo co)                 = mkSymCo <$> go_co env co
@@ -1002,12 +1002,6 @@ mapTyCoX (TyCoMapper { tcm_tyvar = tyvar
            ; return $ mkForAllCo tv' visL visR kind_co' co' }
         -- See Note [Efficiency for ForAllCo case of mapTyCoX]
 
-    -- See Note [Use explicit recursion in mapTyCo]
-    go_fcvs :: env -> [CoVar] -> m DTyCoVarSet
-    go_fcvs _   []       = return emptyDVarSet
-    go_fcvs env (cv:cvs) = do { co   <- covar env cv
-                              ; cvs' <- go_fcvs env cvs
-                              ; return (tyCoVarsOfCoDSet co `unionDVarSet` cvs') }
 
 {- Note [Use explicit recursion in mapTyCo]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

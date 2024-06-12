@@ -1104,16 +1104,16 @@ mkHoleCo h = HoleCo h
 
 -- | Make a universal coercion between two arbitrary types.
 mkUnivCo :: UnivCoProvenance
-         -> DCoVarSet  -- Free coercion variables of the evidence for this coercion
+         -> [Coercion] -- ^ Coercions on which this depends
          -> Role       -- ^ role of the built coercion, "r"
          -> Type       -- ^ t1 :: k1
          -> Type       -- ^ t2 :: k2
          -> Coercion   -- ^ :: t1 ~r t2
-mkUnivCo prov cvs role ty1 ty2
+mkUnivCo prov deps role ty1 ty2
   | ty1 `eqType` ty2 = mkReflCo role ty1
   | otherwise        = UnivCo { uco_prov = prov, uco_role = role
                               , uco_lty = ty1, uco_rty = ty2
-                              , uco_cvs = cvs }
+                              , uco_deps = deps }
 
 -- | Create a symmetric version of the given 'Coercion' that asserts
 --   equality between the same types but in the other "direction", so
@@ -1400,8 +1400,7 @@ mkProofIrrelCo :: Role       -- ^ role of the created coercion, "r"
 -- the individual coercions are.
 mkProofIrrelCo r co g  _ | isGReflCo co  = mkReflCo r (mkCoercionTy g)
   -- kco is a kind coercion, thus @isGReflCo@ rather than @isReflCo@
-mkProofIrrelCo r kco g1 g2 = mkUnivCo ProofIrrelProv
-                                      (coVarsOfCoDSet kco) r
+mkProofIrrelCo r kco g1 g2 = mkUnivCo ProofIrrelProv [kco] r
                                       (mkCoercionTy g1) (mkCoercionTy g2)
 
 {-
@@ -1469,7 +1468,7 @@ setNominalRole_maybe r co
 -- types.
 mkPhantomCo :: Coercion -> Type -> Type -> Coercion
 mkPhantomCo h t1 t2
-  = mkUnivCo PhantomProv (coVarsOfCoDSet h) Phantom t1 t2
+  = mkUnivCo PhantomProv [h] Phantom t1 t2
 
 -- takes any coercion and turns it into a Phantom coercion
 toPhantomCo :: Coercion -> Coercion
@@ -2404,8 +2403,8 @@ seqCo (CoVarCo cv)              = cv `seq` ()
 seqCo (HoleCo h)                = coHoleCoVar h `seq` ()
 seqCo (AxiomInstCo con ind cos) = con `seq` ind `seq` seqCos cos
 seqCo (UnivCo { uco_prov = p, uco_role = r
-              , uco_lty = t1, uco_rty = t2, uco_cvs = cvs })
-  = p `seq` r `seq` seqType t1 `seq` seqType t2 `seq` seqDVarSet cvs
+              , uco_lty = t1, uco_rty = t2, uco_deps = deps })
+  = p `seq` r `seq` seqType t1 `seq` seqType t2 `seq` seqCos deps
 seqCo (SymCo co)                = seqCo co
 seqCo (TransCo co1 co2)         = seqCo co1 `seq` seqCo co2
 seqCo (SelCo n co)              = n `seq` seqCo co

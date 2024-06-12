@@ -2468,13 +2468,10 @@ lintCoercion co@(FunCo { fco_role = r, fco_afl = afl, fco_afr = afr
 
 -- See Note [Bad unsafe coercion]
 lintCoercion co@(UnivCo { uco_role = r
-                        , uco_lty = ty1, uco_rty = ty2, uco_cvs = cvs })
+                        , uco_lty = ty1, uco_rty = ty2, uco_deps = deps })
   = do { ty1' <- lintType ty1
        ; ty2' <- lintType ty2
-       ; subst <- getSubst
-       ; mapM_ (checkTyCoVarInScope subst) (dVarSetElems cvs)
-               -- Don't bother to return substituted fvs;
-               -- they don't matter to Lint
+       ; deps' <- mapM lintCoercion deps
 
        ; let k1 = typeKind ty1'
              k2 = typeKind ty2'
@@ -2482,7 +2479,7 @@ lintCoercion co@(UnivCo { uco_role = r
                             && isTYPEorCONSTRAINT k2)
               (checkTypes ty1 ty2)
 
-       ; return (co { uco_lty = ty1', uco_rty = ty2' }) }
+       ; return (co { uco_lty = ty1', uco_rty = ty2', uco_deps = deps' }) }
    where
      report s = hang (text $ "Unsafe coercion: " ++ s)
                      2 (vcat [ text "From:" <+> ppr ty1

@@ -77,7 +77,7 @@ import {-# SOURCE #-} GHC.Core.Type( chooseFunTyFlag, typeKind, typeTypeOrConstr
 
 -- friends:
 import GHC.Types.Var
-import GHC.Types.Var.Set( DCoVarSet, dVarSetElems, elemVarSet )
+import GHC.Types.Var.Set( elemVarSet )
 import GHC.Core.TyCon
 import GHC.Core.Coercion.Axiom
 
@@ -925,9 +925,7 @@ data Coercion
   | UnivCo { uco_prov         :: UnivCoProvenance
            , uco_role         :: Role
            , uco_lty, uco_rty :: Type
-           , uco_cvs          :: !DCoVarSet  -- Free coercion variables
-               --   The set must contain all the in-scope coercion variables
-               --   that the the proof represented by the coercion makes use of.
+           , uco_deps         :: [Coercion]  -- Coercions on which it depends
                --   See Note [The importance of tracking free coercion variables].
     }
     -- Of kind (lty ~role rty)
@@ -1966,9 +1964,9 @@ foldTyCo (TyCoFolder { tcf_view       = view
     go_co env (CoVarCo cv)             = covar env cv
     go_co env (AxiomInstCo _ _ args)   = go_cos env args
     go_co env (HoleCo hole)            = cohole env hole
-    go_co env (UnivCo { uco_lty = t1, uco_rty = t2, uco_cvs = cvs })
+    go_co env (UnivCo { uco_lty = t1, uco_rty = t2, uco_deps = deps })
                                        = go_ty env t1 `mappend` go_ty env t2
-                                         `mappend` go_cvs env cvs
+                                         `mappend` go_cos env deps
     go_co env (SymCo co)               = go_co env co
     go_co env (TransCo c1 c2)          = go_co env c1 `mappend` go_co env c2
     go_co env (AxiomRuleCo _ cos)      = go_cos env cos
@@ -1986,10 +1984,6 @@ foldTyCo (TyCoFolder { tcf_view       = view
                           `mappend` go_co env' co
       where
         env' = tycobinder env tv Inferred
-
-    -- See Note [Use explicit recursion in foldTyCo]
-    go_cvs env cvs = foldr (add_one env) mempty (dVarSetElems cvs)
-    add_one env cv acc = covar env cv `mappend` acc
 
 -- | A view function that looks through nothing.
 noView :: Type -> Maybe Type

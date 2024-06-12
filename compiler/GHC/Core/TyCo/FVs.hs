@@ -669,8 +669,8 @@ tyCoFVsOfCo (HoleCo h) fv_cand in_scope acc
   = tyCoFVsOfCoVar (coHoleCoVar h) fv_cand in_scope acc
     -- See Note [CoercionHoles and coercion free variables]
 tyCoFVsOfCo (AxiomInstCo _ _ cos) fv_cand in_scope acc = tyCoFVsOfCos cos fv_cand in_scope acc
-tyCoFVsOfCo (UnivCo { uco_lty = t1, uco_rty = t2, uco_cvs = cvs}) fv_cand in_scope acc
-  = (tyCoFVsOfCVs cvs `unionFV` tyCoFVsOfType t1
+tyCoFVsOfCo (UnivCo { uco_lty = t1, uco_rty = t2, uco_deps = deps}) fv_cand in_scope acc
+  = (tyCoFVsOfCos deps `unionFV` tyCoFVsOfType t1
                       `unionFV` tyCoFVsOfType t2) fv_cand in_scope acc
 tyCoFVsOfCo (SymCo co)          fv_cand in_scope acc = tyCoFVsOfCo co fv_cand in_scope acc
 tyCoFVsOfCo (TransCo co1 co2)   fv_cand in_scope acc = (tyCoFVsOfCo co1 `unionFV` tyCoFVsOfCo co2) fv_cand in_scope acc
@@ -684,10 +684,6 @@ tyCoFVsOfCo (AxiomRuleCo _ cs)  fv_cand in_scope acc = tyCoFVsOfCos cs fv_cand i
 tyCoFVsOfCoVar :: CoVar -> FV
 tyCoFVsOfCoVar v fv_cand in_scope acc
   = (unitFV v `unionFV` tyCoFVsOfType (varType v)) fv_cand in_scope acc
-
-tyCoFVsOfCVs :: DCoVarSet -> FV
-tyCoFVsOfCVs cvs  _ _ (have, haveSet)
-  = (dVarSetElems cvs ++ have, dVarSetToVarSet cvs `unionVarSet` haveSet)
 
 tyCoFVsOfCos :: [Coercion] -> FV
 tyCoFVsOfCos []       fv_cand in_scope acc = emptyFV fv_cand in_scope acc
@@ -723,8 +719,8 @@ almost_devoid_co_var_of_co (CoVarCo v) cv = v /= cv
 almost_devoid_co_var_of_co (HoleCo h)  cv = (coHoleCoVar h) /= cv
 almost_devoid_co_var_of_co (AxiomInstCo _ _ cos) cv
   = almost_devoid_co_var_of_cos cos cv
-almost_devoid_co_var_of_co (UnivCo { uco_lty = t1, uco_rty = t2, uco_cvs = cvs }) cv
-  =  not (cv `elemDVarSet` cvs)
+almost_devoid_co_var_of_co (UnivCo { uco_lty = t1, uco_rty = t2, uco_deps = deps }) cv
+  =  almost_devoid_co_var_of_cos deps cv
   && almost_devoid_co_var_of_type t1 cv
   && almost_devoid_co_var_of_type t2 cv
 almost_devoid_co_var_of_co (SymCo co) cv

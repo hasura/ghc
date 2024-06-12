@@ -1783,9 +1783,9 @@ freeNamesIfCoercion (IfaceCoVarCo _)   = emptyNameSet
 freeNamesIfCoercion (IfaceHoleCo _)    = emptyNameSet
 freeNamesIfCoercion (IfaceAxiomInstCo ax _ cos)
   = unitNameSet ax &&& fnList freeNamesIfCoercion cos
-freeNamesIfCoercion (IfaceUnivCo _ _ t1 t2 _ _)
+freeNamesIfCoercion (IfaceUnivCo _ _ t1 t2 _)
   = freeNamesIfType t1 &&& freeNamesIfType t2
-    -- Ignoring free-var fields, which are all local,
+    -- Ignoring uco_deps field, which are all local,
     -- and don't contribute to dependency analysis
 freeNamesIfCoercion (IfaceSymCo c)
   = freeNamesIfCoercion c

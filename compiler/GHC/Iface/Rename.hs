@@ -678,8 +678,8 @@ rnIfaceCo (IfaceCoVarCo lcl) = IfaceCoVarCo <$> pure lcl
 rnIfaceCo (IfaceHoleCo lcl)  = IfaceHoleCo  <$> pure lcl
 rnIfaceCo (IfaceAxiomInstCo n i cs)
     = IfaceAxiomInstCo <$> rnIfaceGlobal n <*> pure i <*> mapM rnIfaceCo cs
-rnIfaceCo (IfaceUnivCo s r t1 t2 cvs fcvs)
-    = IfaceUnivCo s r <$> rnIfaceType t1 <*> rnIfaceType t2 <*> pure cvs <*> pure fcvs
+rnIfaceCo (IfaceUnivCo s r t1 t2 deps)
+    = IfaceUnivCo s r <$> rnIfaceType t1 <*> rnIfaceType t2 <*> mapM rnIfaceCo deps
         -- Renaming affects only type constructors, not coercion variables,
         -- so no need to recurse into the free-var fields
 rnIfaceCo (IfaceSymCo c)
