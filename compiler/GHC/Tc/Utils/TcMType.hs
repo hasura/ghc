@@ -1591,9 +1591,6 @@ collect_cand_qtvs_co orig_ty cur_lvl bound = go_co
     go_mco dv MRefl    = return dv
     go_mco dv (MCo co) = go_co dv co
 
-    zt_cv :: CoVar -> TcM CandidatesQTvs -> TcM CandidatesQTvs
-    zt_cv cv mdvs = do { dvs <- mdvs; go_cv dvs cv }
-
     go_cv :: CandidatesQTvs -> CoVar -> TcM CandidatesQTvs
     go_cv dv@(DV { dv_cvs = cvs }) cv
       | is_bound cv         = return dv
