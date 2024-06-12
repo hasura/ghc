@@ -34,7 +34,7 @@ module GHC.Tc.Solver.Monad (
     -- The pipeline
     StopOrContinue(..), continueWith, stopWith,
     startAgainWith, SolverStage(Stage, runSolverStage), simpleStage,
-    stopWithStage,
+    stopWithStage, nopStage,
 
     -- Tracing etc
     panicTcS, traceTcS, tryEarlyAbortTcS,
@@ -283,6 +283,9 @@ instance Monad SolverStage where
                            StartAgain x   -> return (StartAgain x)
                            Stop ev d      -> return (Stop ev d)
                            ContinueWith x -> runSolverStage (k x) }
+
+nopStage :: a -> SolverStage a
+nopStage res = Stage (continueWith res)
 
 simpleStage :: TcS a -> SolverStage a
 -- Always does a ContinueWith; no Stop or StartAgain

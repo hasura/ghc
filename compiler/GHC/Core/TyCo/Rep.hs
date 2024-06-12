@@ -922,13 +922,14 @@ data Coercion
     -- The number coercions should match exactly the expectations
     -- of the CoAxiomRule (i.e., the rule is fully saturated).
 
-  | UnivCo { uco_prov         :: UnivCoProvenance
-           , uco_role         :: Role
-           , uco_lty, uco_rty :: Type
-           , uco_deps         :: [Coercion]  -- Coercions on which it depends
-               --   See Note [The importance of tracking free coercion variables].
-    }
-    -- Of kind (lty ~role rty)
+  | UnivCo  -- See Note [UnivCo]
+            -- Of kind (lty ~role rty)
+      { uco_prov         :: UnivCoProvenance
+      , uco_role         :: Role
+      , uco_lty, uco_rty :: Type
+      , uco_deps         :: [Coercion]  -- Coercions on which it depends
+               --   See Note [The importance of tracking UnivCo dependencies]
+      }
 
   | SymCo Coercion             -- :: e -> e
   | TransCo Coercion Coercion  -- :: e -> e -> e
@@ -997,22 +998,6 @@ instance Outputable FunSel where
   ppr SelMult = text "mult"
   ppr SelArg  = text "arg"
   ppr SelRes  = text "res"
-
-instance Binary UnivCoProvenance where
-  put_ bh PhantomProv         = putByte bh 1
-  put_ bh ProofIrrelProv = putByte bh 2
-  put_ bh (PluginProv a) = do { putByte bh 3
-                              ; put_ bh a }
-
-  get bh = do
-      tag <- getByte bh
-      case tag of
-           1 -> return PhantomProv
-           2 -> return ProofIrrelProv
-           3 -> do a <- get bh
-                   return $ PluginProv a
-           _ -> panic ("get UnivCoProvenance " ++ show tag)
-
 
 instance Binary CoSel where
    put_ bh (SelTyCon n r)   = do { putByte bh 0; put_ bh n; put_ bh r }
@@ -1549,16 +1534,29 @@ in nominal ways. If not, having w be representational is OK.
 
 %************************************************************************
 %*                                                                      *
-                UnivCoProvenance
+                UnivCo
 %*                                                                      *
 %************************************************************************
 
+Note [UnivCo]
+~~~~~~~~~~~~~
 A UnivCo is a coercion whose proof does not directly express its role
 and kind (indeed for some UnivCos, like PluginProv, there /is/ no proof).
 
-The different kinds of UnivCo are described by UnivCoProvenance.  Really
-each is entirely separate, but they all share the need to represent their
-role and kind, which is done in the UnivCo constructor.
+The different kinds of UnivCo are described by UnivCoProvenance.  Really each
+is entirely separate, but they all share the need to represent these fields:
+
+  UnivCo
+      { uco_prov         :: UnivCoProvenance
+      , uco_role         :: Role
+      , uco_lty, uco_rty :: Type
+      , uco_deps         :: [Coercion]  -- Coercions on which it depends
+
+Here,
+ * uco_role, uco_lty, uco_rty express the type of the coercoin
+ * uco_prov says where it came from
+ * uco_deps specifies the coercions on which this proof (which is not
+   explicity given) depends.  See 
 
 -}
 
@@ -1582,16 +1580,123 @@ data UnivCoProvenance
       -- ^ From a plugin, which asserts that this coercion is sound.
       --   The string and the variable set are for the use by the plugin.
 
+  | BuiltinProv   -- The proof comes form GHC's knowledge of arithmetic
+                  -- or strings; e.g. from (co : a+b ~ 0) we can deduce that
+                  -- (a ~ 0) and (b ~ 0), with a BuiltinProv proof.
+
   deriving (Eq, Ord, Data.Data)
   -- Why Ord?  See Note [Ord instance of IfaceType] in GHC.Iface.Type
 
 instance Outputable UnivCoProvenance where
+  ppr BuiltinProv      = text "(builtin)"
   ppr PhantomProv      = text "(phantom)"
-  ppr ProofIrrelProv   = text "(proof irrel.)"
+  ppr ProofIrrelProv   = text "(proof irrel)"
   ppr (PluginProv str) = parens (text "plugin" <+> brackets (text str))
 
 instance NFData UnivCoProvenance where
   rnf p = p `seq` ()
+
+instance Binary UnivCoProvenance where
+  put_ bh BuiltinProv    = putByte bh 1
+  put_ bh PhantomProv    = putByte bh 2
+  put_ bh ProofIrrelProv = putByte bh 3
+  put_ bh (PluginProv a) = putByte bh 4 >> put_ bh a
+  get bh = do
+      tag <- getByte bh
+      case tag of
+           1 -> return BuiltinProv
+           2 -> return PhantomProv
+           3 -> return ProofIrrelProv
+           4 -> do a <- get bh
+                   return $ PluginProv a
+           _ -> panic ("get UnivCoProvenance " ++ show tag)
+
+
+{- Note [Phantom coercions]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Consider
+     data T a = T1 | T2
+Then we have
+     T s ~R T t
+for any old s,t. The witness for this is (TyConAppCo T Rep co),
+where (co :: s ~P t) is a phantom coercion built with PhantomProv.
+The role of the UnivCo is always Phantom.  The Coercion stored is the
+(nominal) kind coercion between the types
+   kind(s) ~N kind (t)
+
+Note [ProofIrrelProv]
+~~~~~~~~~~~~~~~~~~~~~
+A ProofIrrelProv is a coercion between coercions. For example:
+
+  data G a where
+    MkG :: G Bool
+
+In core, we get
+
+  G :: * -> *
+  MkG :: forall (a :: *). (a ~ Bool) -> G a
+
+Now, consider 'MkG -- that is, MkG used in a type -- and suppose we want
+a proof that ('MkG a1 co1) ~ ('MkG a2 co2). This will have to be
+
+  TyConAppCo Nominal MkG [co3, co4]
+  where
+    co3 :: co1 ~ co2
+    co4 :: a1 ~ a2
+
+Note that
+  co1 :: a1 ~ Bool
+  co2 :: a2 ~ Bool
+
+Here,
+  co3 = UnivCo ProofIrrelProv Nominal (CoercionTy co1) (CoercionTy co2) [co5]
+  where
+    co5 :: (a1 ~ Bool) ~ (a2 ~ Bool)
+    co5 = TyConAppCo Nominal (~#) [<*>, <*>, co4, <Bool>]
+
+
+Note [The importance of tracking UnivCo dependencies]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+It is vital that `UnivCo` (a coercion that lacks a proper proof)
+tracks the coercions on which it depends. To see why, consider this program:
+
+    type S :: Nat -> Nat
+
+    data T (a::Nat) where
+      T1 :: T 0
+      T2 :: ...
+
+    f :: T a -> S (a+1) -> S 1
+    f = /\a (x:T a) (y:a).
+        case x of
+          T1 (gco : a ~# 0) -> y |> wco
+
+For this to typecheck we need `wco :: S (a+1) ~# S 1`, given that `gco : a ~# 0`.
+To prove that we need to know that `a+1 = 1` if `a=0`, which a plugin might know.
+So it solves `wco` by providing a `UnivCo (PluginProv "my-plugin") (a+1) 1 [gco]`.
+
+    But the `uco_deps` in `PluginProv` must mention `gco`!
+
+Why? Otherwise we might float the entire expression (y |> wco) out of the
+the case alternative for `T1` which brings `gco` into scope. If this
+happens then we aren't far from a segmentation fault or much worse.
+See #23923 for a real-world example of this happening.
+
+So it is /crucial/ for the `UnivCo` to mention, in `uco_deps`, the coercion
+variables used by the plugin to justify the `UnivCo` that it builds.  You
+should think of it like `TyConAppCo`: the `UnivCo` proof contstructor is
+applied to a list of coercions, just as `TyConAppCo` is
+
+It's very convenient to record a full coercion, not just a set of free coercion
+variables, because during typechecking those coercions might contain coercion
+holes `HoleCo`, which get filled in later.
+-}
+
+{- **********************************************************************
+%*                                                                      *
+                Coercion holes
+%*                                                                      *
+%********************************************************************* -}
 
 -- | A coercion to be filled in by the type-checker. See Note [Coercion holes]
 data CoercionHole
@@ -1628,19 +1733,7 @@ instance Outputable CoercionHole where
 instance Uniquable CoercionHole where
   getUnique (CoercionHole { ch_co_var = cv }) = getUnique cv
 
-{- Note [Phantom coercions]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Consider
-     data T a = T1 | T2
-Then we have
-     T s ~R T t
-for any old s,t. The witness for this is (TyConAppCo T Rep co),
-where (co :: s ~P t) is a phantom coercion built with PhantomProv.
-The role of the UnivCo is always Phantom.  The Coercion stored is the
-(nominal) kind coercion between the types
-   kind(s) ~N kind (t)
-
-Note [Coercion holes]
+{- Note [Coercion holes]
 ~~~~~~~~~~~~~~~~~~~~~~~~
 During typechecking, constraint solving for type classes works by
   - Generate an evidence Id,  d7 :: Num a
@@ -1715,82 +1808,8 @@ constraint from floating] in GHC.Tc.Solver, item (4):
 Here co2 is a CoercionHole. But we /must/ know that it is free in
 co1, because that's all that stops it floating outside the
 implication.
-
-
-Note [ProofIrrelProv]
-~~~~~~~~~~~~~~~~~~~~~
-A ProofIrrelProv is a coercion between coercions. For example:
-
-  data G a where
-    MkG :: G Bool
-
-In core, we get
-
-  G :: * -> *
-  MkG :: forall (a :: *). (a ~ Bool) -> G a
-
-Now, consider 'MkG -- that is, MkG used in a type -- and suppose we want
-a proof that ('MkG a1 co1) ~ ('MkG a2 co2). This will have to be
-
-  TyConAppCo Nominal MkG [co3, co4]
-  where
-    co3 :: co1 ~ co2
-    co4 :: a1 ~ a2
-
-Note that
-  co1 :: a1 ~ Bool
-  co2 :: a2 ~ Bool
-
-Here,
-  co3 = UnivCo (ProofIrrelProv co5) Nominal (CoercionTy co1) (CoercionTy co2)
-  where
-    co5 :: (a1 ~ Bool) ~ (a2 ~ Bool)
-    co5 = TyConAppCo Nominal (~#) [<*>, <*>, co4, <Bool>]
-
-
-Note [The importance of tracking free coercion variables]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-It is vital that `UnivCo` (a coercion that lacks a proper proof)
-tracks its free coercion variables. To see why, consider this program:
-
-    type S :: Nat -> Nat
-
-    data T (a::Nat) where
-      T1 :: T 0
-      T2 :: ...
-
-    f :: T a -> S (a+1) -> S 1
-    f = /\a (x:T a) (y:a).
-        case x of
-          T1 (gco : a ~# 0) -> y |> wco
-
-For this to typecheck we need `wco :: S (a+1) ~# S 1`, given that `gco : a ~# 0`.
-To prove that we need to know that `a+1 = 1` if `a=0`, which a plugin might know.
-So it solves `wco` by providing a `UnivCo (PluginProv "my-plugin" gcvs) (a+1) 1`.
-
-    But the `gcvs` in `PluginProv` must mention `gco`.
-
-Why? Otherwise we might float the entire expression (y |> wco) out of the
-the case alternative for `T1` which brings `gco` into scope. If this
-happens then we aren't far from a segmentation fault or much worse.
-See #23923 for a real-world example of this happening.
-
-So it is /crucial/ for the `PluginProv` to mention, in `gcvs`, the coercion
-variables used by the plugin to justify the `UnivCo` that it builds.
-
-Note that we don't need to track
-* the coercion's free *type* variables
-* coercion variables free in kinds (we only need the "shallow" free covars)
-
-This means that we may float past type variables which the original
-proof had as free variables. While surprising, this doesn't jeopardise
-the validity of the coercion, which only depends upon the scoping
-relative to the free coercion variables.
-
-(The free coercion variables are kept as a DCoVarSet in UnivCo,
-since these sets are included in interface files.)
-
 -}
+
 
 
 {- *********************************************************************

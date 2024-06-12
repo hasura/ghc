@@ -1396,16 +1396,16 @@ parameters, is that we simply produce new Wanted equalities.  So for example
 
         class D a b | a -> b where ...
     Inert:
-        d1 :g D Int Bool
+        [G] d1 : D Int Bool
     WorkItem:
-        d2 :w D Int alpha
+        [W] d2 : D Int alpha
 
     We generate the extra work item
-        cv :w alpha ~ Bool
+        [W] cv : alpha ~ Bool
     where 'cv' is currently unused.  However, this new item can perhaps be
     spontaneously solved to become given and react with d2,
     discharging it in favour of a new constraint d2' thus:
-        d2' :w D Int Bool
+        [W[ d2' : D Int Bool
         d2 := d2' |> D Int cv
     Now d2' can be discharged from d1
 
@@ -1415,20 +1415,20 @@ using those extra equalities.
 If that were the case with the same inert set and work item we might discard
 d2 directly:
 
-        cv :w alpha ~ Bool
+        [W] cv : alpha ~ Bool
         d2 := d1 |> D Int cv
 
 But in general it's a bit painful to figure out the necessary coercion,
 so we just take the first approach. Here is a better example. Consider:
     class C a b c | a -> b
 And:
-     [Given]  d1 : C T Int Char
-     [Wanted] d2 : C T beta Int
+     [G]  d1 : C T Int Char
+     [W] d2 : C T beta Int
 In this case, it's *not even possible* to solve the wanted immediately.
 So we should simply output the functional dependency and add this guy
 [but NOT its superclasses] back in the worklist. Even worse:
-     [Given] d1 : C T Int beta
-     [Wanted] d2: C T beta Int
+     [G] d1 : C T Int beta
+     [W] d2: C T beta Int
 Then it is solvable, but its very hard to detect this on the spot.
 
 It's exactly the same with implicit parameters, except that the

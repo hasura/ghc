@@ -2058,7 +2058,7 @@ ctEvTerm ev = EvExpr (ctEvExpr ev)
 -- return an empty set.
 ctEvRewriters :: CtEvidence -> RewriterSet
 ctEvRewriters (CtWanted { ctev_rewriters = rewriters }) = rewriters
-ctEvRewriters _other                                    = emptyRewriterSet
+ctEvRewriters (CtGiven {})                              = emptyRewriterSet
 
 ctEvExpr :: HasDebugCallStack => CtEvidence -> EvExpr
 ctEvExpr ev@(CtWanted { ctev_dest = HoleDest _ })

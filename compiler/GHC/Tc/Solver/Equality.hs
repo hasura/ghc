@@ -115,7 +115,7 @@ solveEquality ev eq_rel ty1 ty2
                                 ; solveIrred irred_ct } ;
 
             Right eq_ct   -> do { tryInertEqs eq_ct
-                                ; tryFunDeps  eq_ct
+                                ; tryFunDeps  eq_rel eq_ct
                                 ; tryQCsEqCt  eq_ct
                                 ; simpleStage (updInertEqs eq_ct)
                                 ; stopWithStage (eqCtEvidence eq_ct) "Kept inert EqCt" } } }
@@ -2991,29 +2991,47 @@ tryFamFamInjectivity ev eq_rel fun_tc1 fun_args1 fun_tc2 fun_args2 mco
   = return False
 
 --------------------
-tryFunDeps :: EqCt -> SolverStage ()
-tryFunDeps work_item@(EqCt { eq_lhs = lhs, eq_ev = ev })
+tryFunDeps :: EqRel -> EqCt -> SolverStage ()
+tryFunDeps eq_rel work_item@(EqCt { eq_lhs = lhs, eq_ev = ev })
+  | NomEq <- eq_rel
+  , TyFamLHS tc args <- lhs
   = Stage $
-    case lhs of
-       TyFamLHS tc args -> do { inerts <- getInertCans
-                              ; imp1 <- improveLocalFunEqs inerts tc args work_item
-                              ; imp2 <- improveTopFunEqs tc args work_item
-                              ; if (imp1 || imp2)
-                                then startAgainWith (mkNonCanonical ev)
-                                else continueWith () }
-       TyVarLHS {} -> continueWith ()
+    do { inerts <- getInertCans
+       ; imp1 <- improveLocalFunEqs inerts tc args work_item
+       ; imp2 <- improveTopFunEqs tc args work_item
+       ; if (imp1 || imp2)
+         then startAgainWith (mkNonCanonical ev)
+         else continueWith () }
+  | otherwise
+  = nopStage ()
 
 --------------------
 improveTopFunEqs :: TyCon -> [TcType] -> EqCt -> TcS Bool
 -- See Note [FunDep and implicit parameter reactions]
-improveTopFunEqs fam_tc args (EqCt { eq_ev = ev, eq_rhs = rhs })
+improveTopFunEqs fam_tc args (EqCt { eq_ev = ev, eq_rhs = rhs_ty })
   | isGiven ev
-  = return False  -- See Note [No Given/Given fundeps]
-
+  = improveGivenTopFunEqs fam_tc args ev rhs_ty
   | otherwise
+  = improveWantedTopFunEqs fam_tc args ev rhs_ty
+
+improveGivenTopFunEqs :: TyCon -> [TcType] -> CtEvidence -> Xi -> TcS Bool
+improveGivenTopFunEqs fam_tc args ev rhs_ty
+  | Just ops <- isBuiltInSynFamTyCon_maybe fam_tc
+  = do { emitNewGivens (ctEvLoc ev) $
+           [ (Nominal, s, t, new_co)
+           | Pair s t <- sfInteractTop ops args rhs_ty
+           , let new_co = mkUnivCo BuiltinProv [given_co] Nominal s t ]
+       ; return False }
+  | otherwise
+  = return False    -- See Note [No Given/Given fundeps]
+  where
+    given_co :: Coercion = ctEvCoercion ev
+
+improveWantedTopFunEqs :: TyCon -> [TcType] -> CtEvidence -> Xi -> TcS Bool
+improveWantedTopFunEqs fam_tc args ev rhs_ty
   = do { fam_envs <- getFamInstEnvs
-       ; eqns <- improve_top_fun_eqs fam_envs fam_tc args rhs
-       ; traceTcS "improveTopFunEqs" (vcat [ ppr fam_tc <+> ppr args <+> ppr rhs
+       ; eqns <- improve_top_fun_eqs fam_envs fam_tc args rhs_ty
+       ; traceTcS "improveTopFunEqs" (vcat [ ppr fam_tc <+> ppr args <+> ppr rhs_ty
                                            , ppr eqns ])
        ; unifyFunDeps ev Nominal $ \uenv ->
          uPairsTcM (bump_depth uenv) (reverse eqns) }
@@ -3026,7 +3044,7 @@ improveTopFunEqs fam_tc args (EqCt { eq_ev = ev, eq_rhs = rhs })
         -- See #14778
 
 improve_top_fun_eqs :: FamInstEnvs
-                    -> TyCon -> [TcType] -> TcType
+                    -> TyCon -> [TcType] -> Xi
                     -> TcS [TypeEqn]
 improve_top_fun_eqs fam_envs fam_tc args rhs_ty
   | Just ops <- isBuiltInSynFamTyCon_maybe fam_tc
