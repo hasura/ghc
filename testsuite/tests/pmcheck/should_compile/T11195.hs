@@ -76,7 +76,7 @@ opt_trans_rule is in_co1@(InstCo co1 ty1) in_co2@(InstCo co2 ty2)
   , co1 `compatible_co` co2 = undefined
 
 opt_trans_rule is (UnivCo { uco_prov = p1 })
-                  (UnivCo ( uco_prov = p2 })
+                  (UnivCo { uco_prov = p2 })
   | p1 == p2 = undefined
     -- if the provenances are different, opt'ing will be very confusing
 

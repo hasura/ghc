@@ -526,6 +526,10 @@ in GHC.Core.Coercion.
 -- | Optimize a phantom coercion. The input coercion may not necessarily
 -- be a phantom, but the output sure will be.
 opt_phantom :: LiftingContext -> SymFlag -> Coercion -> NormalCo
+opt_phantom env sym (UnivCo { uco_prov = prov, uco_lty = t1
+                            , uco_rty = t2, uco_deps = deps })
+  = opt_univ env sym prov deps Phantom t1 t2
+
 opt_phantom env sym co
   = opt_univ env sym PhantomProv [mkKindCo co] Phantom ty1 ty2
   where
