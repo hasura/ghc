@@ -33,7 +33,7 @@ import GHC.Core.TyCon    ( TyCon, FamTyConFlav(..), mkFamilyTyCon
                          , Injectivity(..) )
 import GHC.Core.Coercion ( Role(..) )
 import GHC.Tc.Types.Constraint ( Xi )
-import GHC.Core.Coercion.Axiom ( CoAxiomRule(..), BuiltInSynFamily(..), TypeEqn )
+import GHC.Core.Coercion.Axiom
 import GHC.Core.TyCo.Compare   ( tcEqType )
 import GHC.Types.Name          ( Name, BuiltInSyntax(..) )
 import GHC.Types.Unique.FM
@@ -179,8 +179,10 @@ typeNatSubTyCon :: TyCon
 typeNatSubTyCon = mkTypeNatFunTyCon2 name
   BuiltInSynFamily
     { sfMatchFam      = matchFamSub
-    , sfInteractTop   = interactTopSub
-    , sfInteractInert = interactInertSub
+    , sfInteractTop   = sfInteractTopNone
+    , sfInteractInert = sfInteractInertNone
+--    , sfInteractTop   = \_ -> [] interactTopSub
+--    , sfInteractInert = interactInertSub
     }
   where
   name = mkWiredInTyConName UserSyntax gHC_INTERNAL_TYPENATS (fsLit "-")
@@ -190,8 +192,10 @@ typeNatMulTyCon :: TyCon
 typeNatMulTyCon = mkTypeNatFunTyCon2 name
   BuiltInSynFamily
     { sfMatchFam      = matchFamMul
-    , sfInteractTop   = interactTopMul
-    , sfInteractInert = interactInertMul
+    , sfInteractTop   = sfInteractTopNone
+    , sfInteractInert = sfInteractInertNone
+--    , sfInteractTop   = interactTopMul
+--    , sfInteractInert = interactInertMul
     }
   where
   name = mkWiredInTyConName UserSyntax gHC_INTERNAL_TYPENATS (fsLit "*")
@@ -201,8 +205,10 @@ typeNatDivTyCon :: TyCon
 typeNatDivTyCon = mkTypeNatFunTyCon2 name
   BuiltInSynFamily
     { sfMatchFam      = matchFamDiv
-    , sfInteractTop   = interactTopDiv
-    , sfInteractInert = interactInertDiv
+    , sfInteractTop   = sfInteractTopNone
+    , sfInteractInert = sfInteractInertNone
+--    , sfInteractTop   = interactTopDiv
+--    , sfInteractInert = interactInertDiv
     }
   where
   name = mkWiredInTyConName UserSyntax gHC_INTERNAL_TYPENATS (fsLit "Div")
@@ -212,8 +218,10 @@ typeNatModTyCon :: TyCon
 typeNatModTyCon = mkTypeNatFunTyCon2 name
   BuiltInSynFamily
     { sfMatchFam      = matchFamMod
-    , sfInteractTop   = interactTopMod
-    , sfInteractInert = interactInertMod
+    , sfInteractTop   = sfInteractTopNone
+    , sfInteractInert = sfInteractInertNone
+--    , sfInteractTop   = interactTopMod
+--    , sfInteractInert = interactInertMod
     }
   where
   name = mkWiredInTyConName UserSyntax gHC_INTERNAL_TYPENATS (fsLit "Mod")
@@ -223,8 +231,10 @@ typeNatExpTyCon :: TyCon
 typeNatExpTyCon = mkTypeNatFunTyCon2 name
   BuiltInSynFamily
     { sfMatchFam      = matchFamExp
-    , sfInteractTop   = interactTopExp
-    , sfInteractInert = interactInertExp
+    , sfInteractTop   = sfInteractTopNone
+    , sfInteractInert = sfInteractInertNone
+--    , sfInteractTop   = interactTopExp
+--    , sfInteractInert = interactInertExp
     }
   where
   name = mkWiredInTyConName UserSyntax gHC_INTERNAL_TYPENATS (fsLit "^")
@@ -234,14 +244,14 @@ typeNatLogTyCon :: TyCon
 typeNatLogTyCon = mkTypeNatFunTyCon1 name
   BuiltInSynFamily
     { sfMatchFam      = matchFamLog
-    , sfInteractTop   = interactTopLog
-    , sfInteractInert = interactInertLog
+    , sfInteractTop   = sfInteractTopNone
+    , sfInteractInert = sfInteractInertNone
+--    , sfInteractTop   = interactTopLog
+--    , sfInteractInert = interactInertLog
     }
   where
   name = mkWiredInTyConName UserSyntax gHC_INTERNAL_TYPENATS (fsLit "Log2")
             typeNatLogTyFamNameKey typeNatLogTyCon
-
-
 
 typeNatCmpTyCon :: TyCon
 typeNatCmpTyCon =
@@ -277,16 +287,20 @@ typeSymbolCmpTyCon =
                 typeSymbolCmpTyFamNameKey typeSymbolCmpTyCon
   ops = BuiltInSynFamily
     { sfMatchFam      = matchFamCmpSymbol
-    , sfInteractTop   = interactTopCmpSymbol
-    , sfInteractInert = \_ _ _ _ -> []
+    , sfInteractTop   = sfInteractTopNone
+    , sfInteractInert = sfInteractInertNone
+--    , sfInteractTop   = interactTopCmpSymbol
+--    , sfInteractInert = sfInteractInertNone
     }
 
 typeSymbolAppendTyCon :: TyCon
 typeSymbolAppendTyCon = mkTypeSymbolFunTyCon2 name
   BuiltInSynFamily
     { sfMatchFam      = matchFamAppendSymbol
-    , sfInteractTop   = interactTopAppendSymbol
-    , sfInteractInert = interactInertAppendSymbol
+    , sfInteractTop   = sfInteractTopNone
+    , sfInteractInert = sfInteractInertNone
+--    , sfInteractTop   = interactTopAppendSymbol
+--    , sfInteractInert = interactInertAppendSymbol
     }
   where
   name = mkWiredInTyConName UserSyntax gHC_INTERNAL_TYPELITS (fsLit "AppendSymbol")
@@ -306,8 +320,10 @@ typeConsSymbolTyCon =
                   typeConsSymbolTyFamNameKey typeConsSymbolTyCon
   ops = BuiltInSynFamily
       { sfMatchFam      = matchFamConsSymbol
-      , sfInteractTop   = interactTopConsSymbol
-      , sfInteractInert = interactInertConsSymbol
+      , sfInteractTop   = sfInteractTopNone
+      , sfInteractInert = sfInteractInertNone
+--      , sfInteractTop   = interactTopConsSymbol
+--      , sfInteractInert = interactInertConsSymbol
       }
 
 typeUnconsSymbolTyCon :: TyCon
@@ -324,8 +340,10 @@ typeUnconsSymbolTyCon =
                   typeUnconsSymbolTyFamNameKey typeUnconsSymbolTyCon
   ops = BuiltInSynFamily
       { sfMatchFam      = matchFamUnconsSymbol
-      , sfInteractTop   = interactTopUnconsSymbol
-      , sfInteractInert = interactInertUnconsSymbol
+      , sfInteractTop   = sfInteractTopNone
+      , sfInteractInert = sfInteractInertNone
+--      , sfInteractTop   = interactTopUnconsSymbol
+--      , sfInteractInert = interactInertUnconsSymbol
       }
 
 typeCharToNatTyCon :: TyCon
@@ -342,8 +360,10 @@ typeCharToNatTyCon =
                   typeCharToNatTyFamNameKey typeCharToNatTyCon
   ops = BuiltInSynFamily
       { sfMatchFam      = matchFamCharToNat
-      , sfInteractTop   = interactTopCharToNat
-      , sfInteractInert = \_ _ _ _ -> []
+      , sfInteractTop   = sfInteractTopNone
+      , sfInteractInert = sfInteractInertNone
+--      , sfInteractTop   = interactTopCharToNat
+--      , sfInteractInert = sfInteractInertNone
       }
 
 
@@ -361,8 +381,10 @@ typeNatToCharTyCon =
                   typeNatToCharTyFamNameKey typeNatToCharTyCon
   ops = BuiltInSynFamily
       { sfMatchFam      = matchFamNatToChar
-      , sfInteractTop   = interactTopNatToChar
-      , sfInteractInert = \_ _ _ _ -> []
+      , sfInteractTop   = sfInteractTopNone
+      , sfInteractInert = sfInteractInertNone
+--      , sfInteractTop   = interactTopNatToChar
+--      , sfInteractInert = sfInteractInertNone
       }
 
 -- Make a unary built-in constructor of kind: Nat -> Nat
@@ -415,8 +437,8 @@ axAddDef
   , axUnconsSymbolDef
   , axCharToNatDef
   , axNatToCharDef
-  , axAdd0L
-  , axAdd0R
+--  , axAdd0L
+--  , axAdd0R
   , axMul0L
   , axMul0R
   , axMul1L
@@ -504,8 +526,8 @@ axLogDef = mkUnAxiom "LogDef" typeNatLogTyCon isNumLitTy $
               \x -> do (a,_) <- genLog x 2
                        return (num a)
 
-axAdd0L     = mkAxiom1 "Add0L"    $ \(Pair s t) -> (num 0 .+. s) === t
-axAdd0R     = mkAxiom1 "Add0R"    $ \(Pair s t) -> (s .+. num 0) === t
+--axAdd0L     = mkAxiom1 "Add0L"    $ \(Pair s t) -> (num 0 .+. s) === t
+--axAdd0R     = mkAxiom1 "Add0R"    $ \(Pair s t) -> (s .+. num 0) === t
 axSub0R     = mkAxiom1 "Sub0R"    $ \(Pair s t) -> (s .-. num 0) === t
 axMul0L     = mkAxiom1 "Mul0L"    $ \(Pair s _) -> (num 0 .*. s) === num 0
 axMul0R     = mkAxiom1 "Mul0R"    $ \(Pair s _) -> (s .*. num 0) === num 0
@@ -823,21 +845,83 @@ integerToChar _ = Nothing
 Interact with axioms
 -------------------------------------------------------------------------------}
 
-interactTopAdd :: [Xi] -> Xi -> [Pair Type]
+interactTopAdd :: [Xi] -> Xi -> [(CoAxiomRule, TypeEqn)]
 interactTopAdd [s,t] r
-  | Just 0 <- mbZ = [ s === num 0, t === num 0 ]                          -- (s + t ~ 0) => (s ~ 0, t ~ 0)
-  | Just x <- mbX, Just z <- mbZ, Just y <- minus z x = [t === num y]     -- (5 + t ~ 8) => (t ~ 3)
-  | Just y <- mbY, Just z <- mbZ, Just x <- minus z y = [s === num x]     -- (s + 5 ~ 8) => (s ~ 3)
+  = [(ar, eqn) | ar <- [axAdd0L, axAdd0R, axAddKKL, axAddKKR]
+               , [Just eqn] <- [coaxrProves [Pair fam_app r]] ]
   where
-  mbX = isNumLitTy s
-  mbY = isNumLitTy t
-  mbZ = isNumLitTy r
-interactTopAdd _ _ = []
+    fam_app = mkTyConApp typeNatAddTyCon [s,t]
+
+interactInertAdd :: [Xi] -> Xi
+                 -> [Xi] -> Xi
+                 -> [(CoAxiomRule, TypeEqn)]
+interactInertAdd [x1,y1] z1 [x2,y2] z2
+  = [(ar, eqn) | ar <- [axAddInteract11,axAddInteract12,axAddInteract21,axAddInteract22]
+               , [Just eqn] <- [coaxrProves [eq1,eq2]] ]
+  where
+    eq1 = Pair (mkTyConApp typeNatAddTyCon [x1,y1]) z1
+    eq2 = Pair (mkTyConApp typeNatAddTyCon [x2,y2]) z2
+
+axAdd0L, axAdd0R, axAddKKR, axAddKKL :: CoAxiomRule
+axAdd0L   -- (s + t ~ 0) => (s ~ 0)
+  = mkTopBinFamDeduction1 "Add-0L" typeNatAddTyCon $ \ a _b rhs ->
+    do { 0 <- isNumLitTy rhs; return (Pair a (num 0)) }
+axAdd0R   -- (s + t ~ 0) => (t ~ 0)
+  = mkTopBinFamDeduction1 "Add-0R" typeNatAddTyCon $ \ _a b rhs ->
+    do { 0 <- isNumLitTy rhs; return (Pair b (num 0)) }
+axAddKKL   -- (5 + t ~ 8) => (t ~ 3)
+  = mkTopBinFamDeduction1 "Add-KKL" typeNatAddTyCon $ \ a b rhs ->
+    do { na <- isNumLitTy a; nr <- isNumLitTy r; return (Pair b (num (nr-na))) }
+axAddKKR   -- (s + 5 ~ 8) => (s ~ 3)
+  = mkTopBinFamDeduction1 "Add-KKR" typeNatAddTyCon $ \ a b rhs ->
+    do { nb <- isNumLitTy b; nr <- isNumLitTy r; return (Pair a (num (nr-nb))) }
+
+axAddInteract11   -- (x+y1~z, x+y2~z) => (y1 ~ y2)
+  = mkInteractBinFamDeduction "AddI-11" typeNatAddTyCon $ \ q1 y1 z1 q2 y2 z2 ->
+    do { guard (z1 `tcEqType` z2); guard (q1 `tcEqType` q2); return (Pair y1 y2) }
+axAddInteract12   -- (x+y1~z, y2+x~z) => (y1 ~ y2)
+  = mkInteractBinFamDeduction "AddI-12" typeNatAddTyCon $ \ q1 y1 z1 y2 q2 z2 ->
+    do { guard (z1 `tcEqType` z2); guard (q1 `tcEqType` q2); return (Pair y1 y2) }
+axAddInteract21   -- (y1+x~z, x+y2~z) => (y1 ~ y2)
+  = mkInteractBinFamDeduction "AddI-21" typeNatAddTyCon $ \ y1 q1 z1 q2 y2 z2 ->
+    do { guard (z1 `tcEqType` z2); guard (q1 `tcEqType` q2); return (Pair y1 y2) }
+axAddInteract22   -- (y1+x~z, y2+x~z) => (y1 ~ y2)
+  = mkInteractBinFamDeduction "AddI-22" typeNatAddTyCon $ \ y1 q1 z1 y2 q2 z2 ->
+    do { guard (z1 `tcEqType` z2); guard (q1 `tcEqType` q2); return (Pair y1 y2) }
+
+mkTopBinFamDeduction :: String -> TyCon
+                     -> (Type -> Type -> Type -> Maybe TypeEqn)
+                     -> CoAxiomRule
+mkTopBinFamDeduction str fam_tc f
+  = CoAxiomRule
+    { coaxrName      = fsLit str
+    , coaxrAsmpRoles = [Nominal]
+    , coaxrRole      = Nominal
+    , coaxrProves    = \cs -> do { [Pair lhs rhs] <- cs
+                                 ; Just (tc, [a,b]) <- splitTyConApp_maybe lhs
+                                 ; guard (tc == fam_c)
+                                 ; f a b rhs } }
+
+mkInteractBinFamDeduction :: String -> TyCon
+                     -> (Type -> Type -> Type ->   -- F x1 y1 ~ r1
+                         Type -> Type -> Type ->   -- F x2 y2 ~ r2
+                         Maybe TypeEqn)
+                     -> CoAxiomRule
+mkInteractBinFamDeduction str fam_tc f
+  = CoAxiomRule
+    { coaxrName      = fsLit str
+    , coaxrAsmpRoles = [Nominal]
+    , coaxrRole      = Nominal
+    , coaxrProves    = \cs -> do { [Pair lhs1 rhs1, Pair lhs2 rhs2] <- cs
+                                 ; Just (tc1, [x1,y1]) <- splitTyConApp_maybe lhs1
+                                 ; Just (tc2, [x2,y2]) <- splitTyConApp_maybe lhs2
+                                 ; guard (tc1 == fam_c)
+                                 ; guard (tc2 == fam_c)
+                                 ; f x1 y1 rhs1 x2 y2 rhs2 } }
 
 {-
 Note [Weakened interaction rule for subtraction]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
 A simpler interaction here might be:
 
   `s - t ~ r` --> `t + r ~ s`
@@ -865,6 +949,7 @@ So, for the time being, we only add an improvement when the RHS is a constant,
 which happens to work OK for the moment, although clearly we need to do
 something more general.
 -}
+{-
 interactTopSub :: [Xi] -> Xi -> [Pair Type]
 interactTopSub [s,t] r
   | Just z <- mbZ = [ s === (num z .+. t) ]         -- (s - t ~ 5) => (5 + t ~ s)
@@ -1119,6 +1204,7 @@ genLog x base = Just (exactLoop 0 x)
     | otherwise = let s1 = s + 1 in s1 `seq` underLoop s1 (div i base)
 
 -----------------------------------------------------------------------------
+-}
 
 typeCharCmpTyCon :: TyCon
 typeCharCmpTyCon =
@@ -1134,10 +1220,13 @@ typeCharCmpTyCon =
                   typeCharCmpTyFamNameKey typeCharCmpTyCon
   ops = BuiltInSynFamily
       { sfMatchFam      = matchFamCmpChar
-      , sfInteractTop   = interactTopCmpChar
-      , sfInteractInert = \_ _ _ _ -> []
+      , sfInteractTop   = sfInteractTopNone
+      , sfInteractInert = sfInteractInertNone
+--      , sfInteractTop   = interactTopCmpChar
+--      , sfInteractInert = sfInteractInertNone
       }
 
+{-
 interactTopCmpChar :: [Xi] -> Xi -> [Pair Type]
 interactTopCmpChar [s,t] r
   | Just EQ <- isOrderingLitTy r = [ s === t ]
@@ -1161,3 +1250,4 @@ matchFamCmpChar [s,t]
   where mbX = isCharLitTy s
         mbY = isCharLitTy t
 matchFamCmpChar _ = Nothing
+-}

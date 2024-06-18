@@ -31,7 +31,8 @@ module GHC.Core.Coercion.Axiom (
        Role(..), fsFromRole,
 
        CoAxiomRule(..), TypeEqn,
-       BuiltInSynFamily(..), trivialBuiltInFamily
+       BuiltInSynFamily(..), trivialBuiltInFamily,
+       sfMatchNone, sfInteractTopNone, sfInteractInertNone
        ) where
 
 import GHC.Prelude
@@ -608,12 +609,15 @@ data BuiltInSynFamily = BuiltInSynFamily
     -- where the r in the output is coaxrRole of the rule. It is up to the
     -- caller to ensure that this role is appropriate.
 
-  , sfInteractTop   :: [Type] -> Type -> [TypeEqn]
+  , sfInteractTop   :: [Type] -> Type -> [(CoAxiomRule, TypeEqn)]
     -- If given these type arguments and RHS, returns the equalities that
-    -- are guaranteed to hold.
+    -- are guaranteed to hold.  That is, if
+    --     (ar, Pair s1 s2)  is an element ofo  (sfInteractTop tys ty)
+    -- then  AxiomRule ar [co :: F tys ~ ty]  ::  s1~s2
 
   , sfInteractInert :: [Type] -> Type ->
-                       [Type] -> Type -> [TypeEqn]
+                       [Type] -> Type
+                    -> [(CoAxiomRule,TypeEqn)]
     -- If given one set of arguments and result, and another set of arguments
     -- and result, returns the equalities that are guaranteed to hold.
   }
@@ -621,7 +625,16 @@ data BuiltInSynFamily = BuiltInSynFamily
 -- Provides default implementations that do nothing.
 trivialBuiltInFamily :: BuiltInSynFamily
 trivialBuiltInFamily = BuiltInSynFamily
-  { sfMatchFam      = \_ -> Nothing
-  , sfInteractTop   = \_ _ -> []
-  , sfInteractInert = \_ _ _ _ -> []
+  { sfMatchFam      = sfMatchNone
+  , sfInteractTop   = sfInteractTopNone
+  , sfInteractInert = sfInteractInertNone
   }
+
+sfMatchNone :: a -> Maybe b
+sfMatchNone _ = Nothing
+
+sfInteractTopNone :: a -> b -> [c]
+sfInteractTopNone _ _ = []
+
+sfInteractInertNone :: a -> b -> c -> d -> [e]
+sfInteractInertNone _ _ _ _ = []

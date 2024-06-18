@@ -115,8 +115,7 @@ Wrinkles:
        FDEqn { fd_qtvs = [x], fd_eqs = [Pair (Maybe x) ty] }
 
     Note that the fd_qtvs can be free in the /first/ component of the Pair,
-
-    but not in the seconde (which comes from the [W] constraint.
+    but not in the second (which comes from the [W] constraint).
 
 (2) Multi-range fundeps. When these meta_tvs are involved, there is a subtle
     difference between the fundep (a -> b c) and the two fundeps (a->b, a->c).
