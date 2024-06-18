@@ -44,6 +44,7 @@ import GHC.Types.Name.Reader
 import GHC.Types.Basic
 
 import GHC.Builtin.Types ( anyTypeOfKind )
+import GHC.Builtin.Types.Literals ( tryInteractTopFam, tryInteractInertFam )
 
 import GHC.Utils.Outputable
 import GHC.Utils.Panic
@@ -2982,7 +2983,8 @@ tryFamFamInjectivity ev eq_rel fun_tc1 fun_args1 fun_tc2 fun_args2 mco
         fake_rhs2 = anyTypeOfKind ki2
 
         eqs :: [TypeEqn]
-        eqs = sfInteractInert ops fun_args1 fake_rhs1 fun_args2 fake_rhs2
+        eqs = map snd $ tryInteractInertFam ops fun_tc1
+                            fun_args1 fake_rhs1 fun_args2 fake_rhs2
     in
     unifyFunDeps ev Nominal $ \uenv ->
     uPairsTcM uenv eqs
@@ -3019,8 +3021,8 @@ improveGivenTopFunEqs fam_tc args ev rhs_ty
   | Just ops <- isBuiltInSynFamTyCon_maybe fam_tc
   = do { emitNewGivens (ctEvLoc ev) $
            [ (Nominal, s, t, new_co)
-           | Pair s t <- sfInteractTop ops args rhs_ty
-           , let new_co = mkUnivCo BuiltinProv [given_co] Nominal s t ]
+           | (ax, Pair s t) <- tryInteractTopFam ops fam_tc args rhs_ty
+           , let new_co = mkAxiomRuleCo ax [given_co] ]
        ; return False }
   | otherwise
   = return False    -- See Note [No Given/Given fundeps]
@@ -3048,7 +3050,7 @@ improve_top_fun_eqs :: FamInstEnvs
                     -> TcS [TypeEqn]
 improve_top_fun_eqs fam_envs fam_tc args rhs_ty
   | Just ops <- isBuiltInSynFamTyCon_maybe fam_tc
-  = return (sfInteractTop ops args rhs_ty)
+  = return (map snd $ tryInteractTopFam ops fam_tc args rhs_ty)
 
   -- see Note [Type inference for type families with injectivity]
   | isOpenTypeFamilyTyCon fam_tc
@@ -3162,11 +3164,10 @@ improveLocalFunEqs inerts fam_tc args (EqCt { eq_ev = work_ev, eq_rhs = rhs })
 
     --------------------
     do_one_built_in ops rhs (EqCt { eq_lhs = TyFamLHS _ iargs, eq_rhs = irhs, eq_ev = inert_ev })
-      | not (isGiven inert_ev && isGiven work_ev)  -- See Note [No Given/Given fundeps]
-      = mk_fd_eqns inert_ev (sfInteractInert ops args rhs iargs irhs)
-
+      | isGiven inert_ev && isGiven work_ev
+      = []  -- ToDo: fill in
       | otherwise
-      = []
+      = mk_fd_eqns inert_ev (map snd $ tryInteractInertFam ops fam_tc args rhs iargs irhs)
 
     do_one_built_in _ _ _ = pprPanic "interactFunEq 1" (ppr fam_tc) -- TyVarLHS
 

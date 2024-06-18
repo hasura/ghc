@@ -609,15 +609,13 @@ data BuiltInSynFamily = BuiltInSynFamily
     -- where the r in the output is coaxrRole of the rule. It is up to the
     -- caller to ensure that this role is appropriate.
 
-  , sfInteractTop   :: [Type] -> Type -> [(CoAxiomRule, TypeEqn)]
+  , sfInteractTop   :: [CoAxiomRule]
     -- If given these type arguments and RHS, returns the equalities that
     -- are guaranteed to hold.  That is, if
     --     (ar, Pair s1 s2)  is an element ofo  (sfInteractTop tys ty)
     -- then  AxiomRule ar [co :: F tys ~ ty]  ::  s1~s2
 
-  , sfInteractInert :: [Type] -> Type ->
-                       [Type] -> Type
-                    -> [(CoAxiomRule,TypeEqn)]
+  , sfInteractInert :: [CoAxiomRule]
     -- If given one set of arguments and result, and another set of arguments
     -- and result, returns the equalities that are guaranteed to hold.
   }
@@ -626,15 +624,13 @@ data BuiltInSynFamily = BuiltInSynFamily
 trivialBuiltInFamily :: BuiltInSynFamily
 trivialBuiltInFamily = BuiltInSynFamily
   { sfMatchFam      = sfMatchNone
-  , sfInteractTop   = sfInteractTopNone
-  , sfInteractInert = sfInteractInertNone
+  , sfInteractTop   = []
+  , sfInteractInert = []
   }
 
 sfMatchNone :: a -> Maybe b
 sfMatchNone _ = Nothing
 
-sfInteractTopNone :: a -> b -> [c]
-sfInteractTopNone _ _ = []
-
-sfInteractInertNone :: a -> b -> c -> d -> [e]
-sfInteractInertNone _ _ _ _ = []
+sfInteractTopNone, sfInteractInertNone :: [CoAxiomRule]
+sfInteractTopNone   = []
+sfInteractInertNone = []
