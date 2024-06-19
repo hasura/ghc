@@ -580,6 +580,12 @@ data HsExpr p
   | HsEmbTy   (XEmbTy p)
               (LHsWcType (NoGhcTc p))
 
+  | HsQual (XQual p) (XRec p [LHsExpr p]) (LHsExpr p)
+
+  | HsForAll (XForAll p) (HsForAllTelescope p) (LHsExpr p)
+
+  | HsFunArr (XFunArr p) (HsArrowOf (LHsExpr p) p) (LHsExpr p) (LHsExpr p)
+
   | XExpr       !(XXExpr p)
   -- Note [Trees That Grow] in Language.Haskell.Syntax.Extension for the
   -- general idea, and Note [Rebindable syntax and XXExprGhcRn] in GHC.Hs.Expr

@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE DataKinds #-}
 
 module GHC.Parser.Errors.Types where
 
@@ -156,7 +157,7 @@ data PsMessage
         Test cases:
           T24159_viewpat
    -}
-   | PsWarnViewPatternSignatures
+   | PsWarnViewPatternSignatures (LPat GhcPs) (HsPatSigType GhcPs)
 
    -- | LambdaCase syntax used without the extension enabled
    | PsErrLambdaCase
@@ -283,9 +284,6 @@ data PsMessage
 
    -- | Arrow command-syntax in expression
    | PsErrArrowCmdInExpr !(HsCmd GhcPs)
-
-   -- | View-pattern in expression
-   | PsErrViewPatInExpr !(LHsExpr GhcPs) !(LHsExpr GhcPs)
 
    -- | Or-pattern in expression
    | PsErrOrPatInExpr !(LPat GhcPs)
@@ -484,6 +482,8 @@ data PsMessage
    -- | Or pattern used without -XOrPatterns
    | PsErrIllegalOrPat (LPat GhcPs)
 
+   | PsErrTypeSyntaxInPat !PsErrTypeSyntaxDetails
+
    deriving Generic
 
 -- | Extra details about a parse error, which helps
@@ -543,6 +543,20 @@ data PsErrPunDetails
   = PEP_QuoteDisambiguation
   | PEP_TupleSyntaxType
   | PEP_SumSyntaxType
+
+data PsErrTypeSyntaxDetails
+  = PETS_FunctionArrow
+      (LocatedA (PatBuilder GhcPs))
+      (HsArrowOf (LocatedA (PatBuilder GhcPs)) GhcPs)
+      (LocatedA (PatBuilder GhcPs))
+  | PETS_Multiplicity
+      (EpToken "%")
+      (LocatedA (PatBuilder GhcPs))
+  | PETS_ForallTelescope
+      (HsForAllTelescope GhcPs)
+      (LocatedA (PatBuilder GhcPs))
+  | PETS_ConstraintContext (LocatedA (PatBuilder GhcPs))
+  | PETS_ConstraintArrow
 
 noParseContext :: ParseContext
 noParseContext = ParseContext Nothing NoIncompleteDoBlock

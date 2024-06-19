@@ -789,8 +789,6 @@ identifier :: { LocatedN RdrName }
         | qcon                          { $1 }
         | qvarop                        { $1 }
         | qconop                        { $1 }
-    | '(' '->' ')'      {% amsr (sLL $1 $> $ getRdrName unrestrictedFunTyCon)
-                                (NameAnnRArrow (isUnicode $2) (Just $ glAA $1) (glAA $2) (Just $ glAA $3) []) }
     | '->'              {% amsr (sLL $1 $> $ getRdrName unrestrictedFunTyCon)
                                 (NameAnnRArrow (isUnicode $1) Nothing (glAA $1) Nothing []) }
 
@@ -2208,6 +2206,10 @@ ctype   :: { LHsType GhcPs }
 context :: { LHsContext GhcPs }
         :  btype                        {% checkContext $1 }
 
+expcontext :: {forall b. DisambECP b => PV (LocatedC [LocatedA b])}
+        : infixexp                      { unECP $1 >>= \ $1 ->
+                                          checkContextPV $1 }
+
 {- Note [GADT decl discards annotations]
 ~~~~~~~~~~~~~~~~~~~~~
 The type production for
@@ -2240,6 +2242,11 @@ type :: { LHsType GhcPs }
 
 mult :: { Located (EpUniToken "->" "\8594" -> HsArrow GhcPs) }
         : PREFIX_PERCENT atype          { sLL $1 $> (mkMultTy (epTok $1) $2) }
+
+expmult :: { forall b. DisambECP b => EpUniToken "->" "\8594" ->  PV (Located (HsArrowOf (LocatedA b) GhcPs)) }
+expmult : PREFIX_PERCENT aexp           { \arr ->
+                                          unECP $2 >>= \ $2 ->
+                                          fmap (sLL $1 $>) (mkHsMultPV (epTok $1) $2 arr) }
 
 btype :: { LHsType GhcPs }
         : infixtype                     {% runPV $1 }
@@ -2798,14 +2805,35 @@ infixexp2 :: { ECP }
         -- View patterns and function arrows
         | infixexp '->' infixexp2
                                 { ECP $
+                                  withArrowTag $ \tag ->
                                   unECP $1 >>= \ $1 ->
                                   unECP $3 >>= \ $3 ->
-                                  mkHsViewPatPV (comb2 $1 $>) $1 $3 [mu AnnRarrow $2] }
-        | infixexp mult '->'  infixexp2  { error "infixexp2: mult" }
-        | infixexp      '->.' infixexp2  { error "infixexp2: linear arr" }
-        | infixexp      '=>'  infixexp2  { error "infixexp2: double arr" }
+                                  let arr = HsUnrestrictedArrow (epUniTok $2)
+                                  in mkHsArrowPV (comb2 $1 $>) tag $1 arr $3 }
+        | infixexp expmult '->'  infixexp2
+                                { ECP $
+                                  unECP $1         >>= \ $1 ->
+                                  $2 (epUniTok $3) >>= \ $2 ->
+                                  unECP $4         >>= \ $4 ->
+                                  hintLinear (getLoc $2) >>
+                                  mkHsArrowPV (comb2  $1 $>) FunArrTag $1 (unLoc $2) $4 }
+        | infixexp      '->.' infixexp2
+                                { ECP $
+                                  hintLinear (getLoc $2) >>
+                                  unECP $1 >>= \ $1 ->
+                                  unECP $3 >>= \ $3 ->
+                                  let arr = HsLinearArrow (EpLolly (epTok $2))
+                                  in mkHsArrowPV (comb2 $1 $>) FunArrTag $1 arr $3 }
+        | expcontext    '=>'  infixexp2
+                                { ECP $
+                                        $1 >>= \ $1 ->
+                                  unECP $3 >>= \ $3 ->
+                                  mkQualPV (comb2 $1 $>) (addTrailingDarrowC $1 $2 emptyComments) $3}
 
-        | forall_telescope infixexp2     { error "infixexp2: forall" }
+        | forall_telescope infixexp2
+                                { ECP $
+                                  unECP $2 >>= \ $2 ->
+                                  mkHsForallPV (comb2 $1 $>) (unLoc $1) $2 }
 
 infixexp :: { ECP }
         : exp10 { $1 }
@@ -3675,8 +3703,8 @@ name_var : var { $1 }
 -- are parsed differently.
 
 qcon :: { LocatedN RdrName }
-  : gen_qcon              { $1}
-  | sysdcon               { L (getLoc $1) $ nameRdrName (dataConName (unLoc $1)) }
+  : gen_qcon              { $1 }
+  | syscon                { $1 }
 
 gen_qcon :: { LocatedN RdrName }
   : qconid                { $1 }
@@ -3687,7 +3715,7 @@ con     :: { LocatedN RdrName }
         : conid                 { $1 }
         | '(' consym ')'        {% amsr (sLL $1 $> (unLoc $2))
                                         (NameAnn NameParens (glAA $1) (glAA $2) (glAA $3) []) }
-        | sysdcon               { L (getLoc $1) $ nameRdrName (dataConName (unLoc $1)) }
+        | syscon                { $1 }
 
 con_list :: { Located (NonEmpty (LocatedN RdrName)) }
 con_list : con                  { sL1 $1 (pure $1) }
@@ -3706,11 +3734,16 @@ sysdcon_nolist :: { LocatedN DataCon }  -- Wired in data constructors
         | '(#' commas '#)'      {% amsr (sLL $1 $> $ tupleDataCon Unboxed (snd $2 + 1))
                                        (NameAnnCommas NameParensHash (glAA $1) (map srcSpan2e (fst $2)) (glAA $3) []) }
 
+syscon :: { LocatedN RdrName }
+        : sysdcon               {  L (getLoc $1) $ nameRdrName (dataConName (unLoc $1)) }
+        | '(' '->' ')'          {% amsr (sLL $1 $> $ getRdrName unrestrictedFunTyCon)
+                                        (NameAnnRArrow (isUnicode $2) (Just $ glAA $1) (glAA $2) (Just $ glAA $3) [])}
+
 -- See Note [Empty lists] in GHC.Hs.Expr
 sysdcon :: { LocatedN DataCon }
         : sysdcon_nolist                 { $1 }
         | '(' ')'               {% amsr (sLL $1 $> unitDataCon) (NameAnnOnly NameParens (glAA $1) (glAA $2) []) }
-        |  '[' ']'               {% amsr (sLL $1 $> nilDataCon) (NameAnnOnly NameSquare (glAA $1) (glAA $2) []) }
+        | '[' ']'               {% amsr (sLL $1 $> nilDataCon)  (NameAnnOnly NameSquare (glAA $1) (glAA $2) []) }
 
 conop :: { LocatedN RdrName }
         : consym                { $1 }

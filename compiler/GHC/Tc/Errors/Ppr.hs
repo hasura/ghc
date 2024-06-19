@@ -1952,6 +1952,17 @@ instance Diagnostic TcRnMessage where
     TcRnMisplacedInvisPat tp -> mkSimpleDecorated $
       text "Invisible type pattern" <+> ppr tp <+> text "is not allowed here"
 
+    TcRnIllegalTypeSyntax syntax -> mkSimpleDecorated $
+      vcat [ text "Illegal" <+> what
+           , text "This syntax must be used to instantiate a visible forall" ]
+      where
+        what = case syntax of
+          ForallTelescopeSyntax -> "forall telescope"
+          ContextArrowSyntax -> "context arrow (=>)"
+          FunctionArrowSyntax -> "function type arrow (->)"
+    TcRnUnexpectedTypeSyntaxInTerms -> mkSimpleDecorated $
+      text "Unexpected type syntax in the expression"
+
   diagnosticReason :: TcRnMessage -> DiagnosticReason
   diagnosticReason = \case
     TcRnUnknownMessage m
@@ -2591,6 +2602,10 @@ instance Diagnostic TcRnMessage where
     TcRnOutOfArityTyVar{}
       -> ErrorWithoutFlag
     TcRnMisplacedInvisPat{}
+      -> ErrorWithoutFlag
+    TcRnIllegalTypeSyntax{}
+      -> ErrorWithoutFlag
+    TcRnUnexpectedTypeSyntaxInTerms{}
       -> ErrorWithoutFlag
 
   diagnosticHints = \case
@@ -3270,6 +3285,10 @@ instance Diagnostic TcRnMessage where
       -> noHints
     TcRnMisplacedInvisPat{}
       -> noHints
+    TcRnIllegalTypeSyntax{}
+      -> noHints
+    TcRnUnexpectedTypeSyntaxInTerms{}
+      -> [suggestExtension LangExt.RequiredTypeArguments]
 
   diagnosticCode = constructorCode
 

@@ -1055,7 +1055,7 @@ data WarningFlag =
    | Opt_WarnDataKindsTC                             -- Since 9.10
    | Opt_WarnDeprecatedTypeAbstractions              -- Since 9.10
    | Opt_WarnDefaultedExceptionContext               -- Since 9.10
-   | Opt_WarnViewPatternSignatures                   -- Since 9.12    FIXME (int-index): add to the User's Guide and Release Notes
+   | Opt_WarnViewPatternSignatures                   -- Since 9.12
    deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | Return the names of a WarningFlag

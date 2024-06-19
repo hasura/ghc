@@ -37,6 +37,14 @@ Language
 - :extension:`UnliftedFFITypes`: GHC will now accept FFI types like: ``(# #) -> T`` where ``(# #)``
   is used as the one and only function argument.
 
+- As a part of `GHC Proposal #281 <https://github.com/ghc-proposals/ghc-proposals/blob/master/proposals/0281-visible-forall.rst>`_
+  GHC now accepts type syntax in expressions, namely function type arrow, constraint
+  arrow and forall telescopes: ::
+
+    f :: forall a -> smth
+
+    g = f (forall a. Show a => a -> String)
+
 Compiler
 ~~~~~~~~
 
@@ -75,12 +83,14 @@ Compiler
   <https://gitlab.haskell.org/ghc/ghc/-/issues/24921>`_). This does
   not affect existing support of apple systems on x86_64/aarch64.
 
-- The flag :ghc-flag:`-fignore-asserts` will now also enable the 
+- The flag :ghc-flag:`-fignore-asserts` will now also enable the
   :extension:`CPP` macro ``__GLASGOW_HASKELL_ASSERTS_IGNORED__`` (`#24967
   <https://gitlab.haskell.org/ghc/ghc/-/issues/24967>`_).
   This enables people to write their own custom assertion functions.
   See :ref:`assertions`.
-  
+
+- A new warning :ghc-flag:`-Wview-pattern-signatures` is introduced to notify users about
+  future changes in parsing of view patterns in combination with pattern signatures
 
 GHCi
 ~~~~

@@ -553,6 +553,10 @@ tcExpr (HsStatic fvs expr) res_ty
 
 tcExpr (HsEmbTy _ _) _ = failWith TcRnIllegalTypeExpr
 
+tcExpr (HsQual _ _ _)     _ = failWith (TcRnIllegalTypeSyntax ContextArrowSyntax)
+tcExpr (HsForAll _ _ _)   _ = failWith (TcRnIllegalTypeSyntax ForallTelescopeSyntax)
+tcExpr (HsFunArr _ _ _ _) _ = failWith (TcRnIllegalTypeSyntax FunctionArrowSyntax)
+
 {-
 ************************************************************************
 *                                                                      *

@@ -3063,6 +3063,8 @@ data ExtBits
   | OrPatternsBit
   | ExtendedLiteralsBit
   | ListTuplePunsBit
+  | ViewPatternsBit
+  | RequiredTypeArgumentsBit
 
   -- Flags that are updated once parsing starts
   | InRulePragBit
@@ -3145,6 +3147,8 @@ mkParserOpts extensionFlags diag_opts supported
       .|. OrPatternsBit               `xoptBit` LangExt.OrPatterns
       .|. ExtendedLiteralsBit         `xoptBit` LangExt.ExtendedLiterals
       .|. ListTuplePunsBit            `xoptBit` LangExt.ListTuplePuns
+      .|. ViewPatternsBit             `xoptBit` LangExt.ViewPatterns
+      .|. RequiredTypeArgumentsBit    `xoptBit` LangExt.RequiredTypeArguments
     optBits =
           HaddockBit        `setBitIf` isHaddock
       .|. RawTokenStreamBit `setBitIf` rawTokStream

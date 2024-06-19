@@ -2613,6 +2613,30 @@ of ``-W(no-)*``.
     evidence is available. As this behavior may result in dropped exception context
     this warning is provided to give notice when defaulting occurs.
 
+.. ghc-flag:: -Wview-pattern-signatures
+    :shortdesc: warn when a view pattern is used with type signature without
+                explicit parens
+    :type: dynamic
+    :reverse: -Wno-view-pattern-signatures
+
+    :since: 9.12.1
+
+    Introduced in GHC 9.12.1 in accordance with `GHC Proposal #281 <https://github.com/ghc-proposals/ghc-proposals/blob/master/proposals/0281-visible-forall.rst>`__
+    with the introduction of type syntax in terms. It warns about usage of
+    :extension:`ViewPatterns` in combination with pattern signatures: ::
+
+      f (g -> p :: t) = ()
+
+    Meaning of this code would be changed in a future GHC release. From this: ::
+
+      f (g -> (p :: t)) = ()
+
+    To this:
+
+      f ((g -> p) :: t) = ()
+
+    Users can remove pattern signature or add explicit parens to silence the warning.
+
 If you're feeling really paranoid, the :ghc-flag:`-dcore-lint` option is a good choice.
 It turns on heavyweight intra-pass sanity-checking within GHC. (It checks GHC's
 sanity, not yours.)

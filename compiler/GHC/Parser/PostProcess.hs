@@ -4,6 +4,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE MultiWayIf #-}
 
 --
 --  (c) The University of Glasgow 2002-2006
@@ -105,6 +106,8 @@ module GHC.Parser.PostProcess (
         ecpFromExp,
         ecpFromCmd,
         ecpFromPat,
+        ArrowTag(..), withArrowTag,
+        setTelescopeBndrsNamespace,
         PatBuilder,
         hsHoleExpr,
 
@@ -127,7 +130,7 @@ module GHC.Parser.PostProcess (
 import GHC.Prelude
 import GHC.Hs           -- Lots of it
 import GHC.Core.TyCon          ( TyCon, isTupleTyCon, tyConSingleDataCon_maybe )
-import GHC.Core.DataCon        ( DataCon, dataConTyCon )
+import GHC.Core.DataCon        ( DataCon, dataConTyCon, dataConName )
 import GHC.Core.ConLike        ( ConLike(..) )
 import GHC.Core.Coercion.Axiom ( Role, fsFromRole )
 import GHC.Types.Name.Reader
@@ -146,7 +149,7 @@ import GHC.Core.Type    ( Specificity(..) )
 import GHC.Builtin.Types( cTupleTyConName, tupleTyCon, tupleDataCon,
                           nilDataConName, nilDataConKey,
                           listTyConName, listTyConKey, sumDataCon,
-                          unrestrictedFunTyCon , listTyCon_RDR )
+                          unrestrictedFunTyCon , listTyCon_RDR, unitDataCon )
 import GHC.Types.ForeignCall
 import GHC.Types.SrcLoc
 import GHC.Types.Unique ( hasKey )
@@ -1179,6 +1182,42 @@ checkContext orig_t@(L (EpAnn l _ cs) _orig_t) =
     -- Append parens so that the original order in the source is maintained
     return (L (EpAnn l (AnnContext Nothing oparens cparens) cs) ts)
 
+-- | The same as `checkContext`, but for expressions.
+--
+-- Validate the context constraints and break up a context into a list
+-- of predicates.
+--
+-- @
+--     (Eq a, Ord b)        -->  [Eq a, Ord b]
+--     Eq a                 -->  [Eq a]
+--     (Eq a)               -->  [Eq a]
+--     (((Eq a)))           -->  [Eq a]
+-- @
+checkContextExpr :: LHsExpr GhcPs -> PV (LocatedC [LHsExpr GhcPs])
+checkContextExpr orig_expr@(L (EpAnn l _ cs) _) =
+  check ([],[], cs) orig_expr
+  where
+    check :: ([EpaLocation],[EpaLocation],EpAnnComments)
+        -> LHsExpr GhcPs -> PV (LocatedC [LHsExpr GhcPs])
+    check (oparens,cparens,cs) (L _ (ExplicitTuple [AddEpAnn _ ap_open, AddEpAnn _ ap_close] tup_args boxity))
+             -- Neither unboxed tuples (#e1,e2#) nor tuple sections (e1,,e2,) can be a context
+      | isBoxed boxity
+      , Just es <- tupArgsPresent_maybe tup_args
+      = mkCTuple (oparens ++ [ap_open], ap_close : cparens, cs) es
+    check (opi, cpi, csi) (L _ (HsPar (EpTok open_tok, EpTok close_tok) expr))
+      = check (opi ++ [open_tok], close_tok : cpi, csi) expr
+    check (oparens,cparens,cs) (L _ (HsVar _ (L (EpAnn _ (NameAnnOnly NameParens open closed []) _) name)))
+      | name == nameRdrName (dataConName unitDataCon)
+      = mkCTuple (oparens ++ [open], closed : cparens, cs) []
+    check _ _ = unprocessed
+
+    unprocessed =
+      return (L (EpAnn l (AnnContext Nothing [] []) emptyComments) [orig_expr])
+
+    mkCTuple (oparens, cparens, cs) ts =
+      -- Append parens so that the original order in the source is maintained
+      return (L (EpAnn l (AnnContext Nothing oparens cparens) cs) ts)
+
 checkImportDecl :: Maybe EpaLocation
                 -> Maybe EpaLocation
                 -> P ()
@@ -1230,7 +1269,8 @@ checkPat :: SrcSpanAnnA -> EpAnnComments -> LocatedA (PatBuilder GhcPs) -> [HsCo
 -- SG: I think this function checks what Haskell2010 calls the `pat` and `lpat`
 -- productions
 checkPat loc cs (L l e@(PatBuilderVar (L ln c))) tyargs args
-  | isRdrDataCon c = return (L loc $ ConPat
+  | isRdrDataCon c || isRdrTc c
+  = return (L loc $ ConPat
       { pat_con_ext = noAnn -- AZ: where should this come from?
       , pat_con = L ln c
       , pat_args = PrefixCon tyargs args
@@ -1278,7 +1318,7 @@ checkAPat loc e0 = do
      return (WildPat noExtField)
 
    PatBuilderOpApp l (L cl c) r anns
-     | isRdrDataCon c -> do
+     | isRdrDataCon c || isRdrTc c -> do
          l <- checkLPat l
          r <- checkLPat r
          return $ ConPat
@@ -1680,9 +1720,18 @@ class (b ~ (Body b) GhcPs, AnnoBody b) => DisambECP b where
   -- | Disambiguate "(# a)" (right operator section)
   mkHsSectionR_PV
     :: SrcSpan -> LocatedA (InfixOp b) -> LocatedA b -> PV (LocatedA b)
-  -- | Disambiguate "(a -> b)" (view pattern)
-  mkHsViewPatPV
-    :: SrcSpan -> LHsExpr GhcPs -> LocatedA b -> [AddEpAnn] -> PV (LocatedA b)
+  -- | Disambiguate "(a -> b)" (function arrow type / view pattern)
+  mkHsArrowPV
+    :: SrcSpan -> ArrowTag lhs b -> LocatedA lhs -> HsArrowOf (LocatedA b) GhcPs -> LocatedA b -> PV (LocatedA b)
+  -- | Disambiguate "%m ->" (function arrom multiplicity)
+  mkHsMultPV
+    :: EpToken "%" -> LocatedA b -> EpUniToken "->" "→" -> PV (HsArrowOf (LocatedA b) GhcPs)
+  -- | Disambiguate "forall a. b" and "forall a -> b" (forall telescope)
+  mkHsForallPV :: SrcSpan -> HsForAllTelescope GhcPs -> LocatedA b -> PV (LocatedA b)
+  -- | Disambiguate "(a,b,c)" at the left of "=>" (constraint list)
+  checkContextPV :: LocatedA b -> PV (LocatedC [LocatedA b])
+  -- | Disambiguate "a => b" (constraint context)
+  mkQualPV :: SrcSpan -> LocatedC [LocatedA b] -> LocatedA b -> PV (LocatedA b)
   -- | Disambiguate "a@b" (as-pattern)
   mkHsAsPatPV
     :: SrcSpan -> LocatedN RdrName -> EpToken "@" -> LocatedA b -> PV (LocatedA b)
@@ -1808,8 +1857,18 @@ instance DisambECP (HsCmd GhcPs) where
     let pp_op = fromMaybe (panic "cannot print infix operator")
                           (ppr_infix_expr (unLoc op))
     in pp_op <> ppr c
-  mkHsViewPatPV l a b _ = cmdFail l $
-    ppr a <+> text "->" <+> ppr b
+  mkHsArrowPV l tag a arr b = cmdFail l $
+    case tag of
+      ViewPatTag -> ppr a <+> pprHsArrow arr <+> ppr b
+      FunArrTag  -> ppr a <+> pprHsArrow arr <+> ppr b
+  mkHsMultPV pct mult arr = cmdFail l $
+    ppr pct <> ppr mult <+> ppr arr
+    where l = getHasLoc pct `combineSrcSpans` getHasLoc arr
+  mkHsForallPV l tele cmd = cmdFail l $
+    ppr tele <+> ppr cmd
+  checkContextPV ctxt = cmdFail (getLocA ctxt) $ ppr ctxt
+  mkQualPV l ctxt cmd = cmdFail l $
+    ppr ctxt <+> text "=>" <+> ppr cmd
   mkHsAsPatPV l v _ c = cmdFail l $
     pprPrefixOcc (unLoc v) <> text "@" <> ppr c
   mkHsLazyPatPV l c _ = cmdFail l $
@@ -1905,8 +1964,6 @@ instance DisambECP (HsExpr GhcPs) where
   mkHsSectionR_PV l op e = do
     !cs <- getCommentsFor l
     return $ L (EpAnn (spanAsAnchor l) noAnn cs) (SectionR noExtField op e)
-  mkHsViewPatPV l a b _ = addError (mkPlainErrorMsgEnvelope l $ PsErrViewPatInExpr a b)
-                          >> return (L (noAnnSrcSpan l) (hsHoleExpr noAnn))
   mkHsAsPatPV l v _ e   = addError (mkPlainErrorMsgEnvelope l $ PsErrTypeAppWithoutSpace (unLoc v) e)
                           >> return (L (noAnnSrcSpan l) (hsHoleExpr noAnn))
   mkHsLazyPatPV l e   _ = addError (mkPlainErrorMsgEnvelope l $ PsErrLazyPatWithoutSpace e)
@@ -1917,6 +1974,19 @@ instance DisambECP (HsExpr GhcPs) where
   mkHsEmbTyPV l toktype ty =
     return $ L (noAnnSrcSpan l) $
       HsEmbTy toktype (mkHsWildCardBndrs ty)
+  mkHsArrowPV l tag arg arr res =
+    nukeArrowTag tag $
+    return $ L (noAnnSrcSpan l) $
+      HsFunArr noExtField arr arg res
+  mkHsMultPV pct t arr =
+    return $ mkMultExpr pct t arr
+  mkHsForallPV l telescope ty =
+    return $ L (noAnnSrcSpan l) $
+      HsForAll noExtField (setTelescopeBndrsNamespace varName telescope) ty
+  checkContextPV = checkContextExpr
+  mkQualPV l qual ty =
+    return $ L (noAnnSrcSpan l) $
+      HsQual noExtField qual ty
   rejectPragmaPV (L _ (OpApp _ _ _ e)) =
     -- assuming left-associative parsing of operators
     rejectPragmaPV e
@@ -1962,17 +2032,17 @@ instance DisambECP (PatBuilder GhcPs) where
   mkHsTySigPV l b sig anns = do
     -- addSigPat ensures the correct nesting.
     -- Test case: f (id -> isJust -> True :: Bool) = ()
-    -- TODO (int-index): 1. make it an actual test case
-    --                   2. add the warning -Wview-pattern-signatures in -Wdefault
     let addSigPat (L l' (ViewPat anns' e' p')) =
             L l' (ViewPat anns' e' (addSigPat p'))  -- this branch triggers the warning
-        addSigPat p = L l (SigPat anns p (mkHsPatSigType noAnn sig))
+        addSigPat p = L l (SigPat anns p patSig)
           -- FIXME (int-index): sort out annotations/locations
 
         addSigPatP p@(L _ ViewPat{}) = do
-          addPsMessage (locA l) PsWarnViewPatternSignatures
+          addPsMessage (locA l) (PsWarnViewPatternSignatures p patSig)
           return (addSigPat p)
-        addSigPatP p = return $ L l (SigPat anns p (mkHsPatSigType noAnn sig))
+        addSigPatP p = return $ L l (SigPat anns p patSig)
+
+        patSig = mkHsPatSigType noAnn sig
     p <- checkLPat b >>= addSigPatP
     return $ fmap PatBuilderPat p
   mkHsExplicitListPV l xs anns = do
@@ -1997,10 +2067,22 @@ instance DisambECP (PatBuilder GhcPs) where
     !cs <- getCommentsFor l
     return $ L (EpAnn (spanAsAnchor l) noAnn cs) (PatBuilderPat (mkNPat lit (Just noSyntaxExpr) anns))
   mkHsSectionR_PV l op p = patFail l (PsErrParseRightOpSectionInPat (unLoc op) (unLoc p))
-  mkHsViewPatPV l a b anns = do
-    p <- checkLPat b
-    !cs <- getCommentsFor l
-    return $ L (EpAnn (spanAsAnchor l) noAnn cs) (PatBuilderPat (ViewPat anns a p))
+  mkHsArrowPV l tag a arr b = do
+    case tag of
+      ViewPatTag ->
+        case arr of
+          HsUnrestrictedArrow x ->  do
+            p <- checkLPat b
+            !cs <- getCommentsFor l
+            return $ L (EpAnn (spanAsAnchor l) noAnn cs) (PatBuilderPat (ViewPat x a p))
+          _ -> panic "Linear arrow inside a view pattern"
+      FunArrTag -> patFail l (PsErrTypeSyntaxInPat (PETS_FunctionArrow a arr  b))
+  mkHsMultPV tok arg _ =
+    let l = getHasLoc tok `combineSrcSpans` getLocA arg in
+    patFail l (PsErrTypeSyntaxInPat (PETS_Multiplicity tok arg))
+  mkHsForallPV l tele body = patFail l (PsErrTypeSyntaxInPat (PETS_ForallTelescope tele body))
+  checkContextPV ctx = patFail (getLocA ctx) (PsErrTypeSyntaxInPat (PETS_ConstraintContext ctx))
+  mkQualPV l _ _ = patFail l (PsErrTypeSyntaxInPat PETS_ConstraintArrow)
   mkHsAsPatPV l v at e = do
     p <- checkLPat e
     !cs <- getCommentsFor l
@@ -2020,6 +2102,36 @@ instance DisambECP (PatBuilder GhcPs) where
     return $ L (noAnnSrcSpan l) $
       PatBuilderPat (EmbTyPat toktype (mkHsTyPat ty))
   rejectPragmaPV _ = return ()
+
+data ArrowTag lhs rhs where
+  ViewPatTag :: ArrowTag (HsExpr GhcPs) b
+  FunArrTag  :: ArrowTag b b
+
+nukeArrowTag :: ArrowTag lhs (HsExpr GhcPs) -> (lhs ~ HsExpr GhcPs => r) -> r
+nukeArrowTag tag k = case tag of
+  ViewPatTag -> k
+  FunArrTag -> k
+
+withArrowTag :: DisambECP b => (forall lhs. DisambECP lhs => ArrowTag lhs b -> PV r) -> PV r
+withArrowTag cont = do
+  vpEnabled <- getBit ViewPatternsBit
+  rtaEnabled <- getBit RequiredTypeArgumentsBit
+  if | vpEnabled  -> cont ViewPatTag
+     | rtaEnabled -> cont FunArrTag
+     | otherwise  -> cont ViewPatTag -- Error message should suggest ViewPatterns in patterns
+
+setTelescopeBndrsNamespace :: NameSpace -> HsForAllTelescope GhcPs -> HsForAllTelescope GhcPs
+setTelescopeBndrsNamespace ns forall_telescope = case forall_telescope of
+  HsForAllInvis x invis_bndrs -> HsForAllInvis x (map set_bndr_ns invis_bndrs)
+  HsForAllVis x vis_bndrs -> HsForAllVis x (map set_bndr_ns vis_bndrs)
+  where
+    set_bndr_ns :: LHsTyVarBndr flag GhcPs -> LHsTyVarBndr flag GhcPs
+    set_bndr_ns (L l bndr) = L l $ case bndr of
+      UserTyVar x flag rdr -> UserTyVar x flag (set_rdr_ns rdr)
+      KindedTyVar x flag rdr kind -> KindedTyVar x flag (set_rdr_ns rdr) kind
+
+    set_rdr_ns (L l (Unqual occ)) = L l (Unqual occ{occNameSpace = ns})
+    set_rdr_ns rdr = rdr
 
 -- | Ensure that a literal pattern isn't of type Addr#, Float#, Double#.
 checkUnboxedLitPat :: Located (HsLit GhcPs) -> PV ()
@@ -3267,6 +3379,16 @@ mkMultTy pct t@(L _ (HsTyLit _ (HsNumTy (SourceText (unpackFS -> "1")) 1))) arr
     pct1 :: EpToken "%1"
     pct1 = epTokenWidenR pct (locA (getLoc t))
 mkMultTy pct t arr = HsExplicitMult (pct, arr) t
+
+mkMultExpr :: EpToken "%" -> LHsExpr GhcPs -> EpUniToken "->" "→" -> HsArrowOf (LHsExpr GhcPs) GhcPs
+mkMultExpr pct t@(L _ (HsOverLit _ (OverLit _ (HsIntegral (IL (SourceText (unpackFS -> "1")) _ 1))))) arr
+  -- See #18888 for the use of (SourceText "1") above
+  = HsLinearArrow (EpPct1 pct1 arr)
+  where
+    -- The location of "%" combined with the location of "1".
+    pct1 :: EpToken "%1"
+    pct1 = epTokenWidenR pct (locA (getLoc t))
+mkMultExpr pct t arr = HsExplicitMult (pct, arr) t
 
 mkMultAnn :: EpToken "%" -> LHsType GhcPs -> HsMultAnn GhcPs
 mkMultAnn pct t@(L _ (HsTyLit _ (HsNumTy (SourceText (unpackFS -> "1")) 1)))

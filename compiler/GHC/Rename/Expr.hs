@@ -613,6 +613,28 @@ rnExpr (HsEmbTy _ ty)
   = do { (ty', fvs) <- rnHsWcType HsTypeCtx ty
        ; return (HsEmbTy noExtField ty', fvs) }
 
+rnExpr (HsQual _ (L ann ctxt) ty)
+  = do { (ctxt', fvs_ctxt) <- mapAndUnzipM rnLExpr ctxt
+       ; (ty', fvs_ty) <- rnLExpr ty
+       ; unlessXOptM LangExt.RequiredTypeArguments $
+         addErr TcRnUnexpectedTypeSyntaxInTerms
+       ; return (HsQual noExtField (L ann ctxt') ty', plusFVs fvs_ctxt `plusFV` fvs_ty) }
+
+rnExpr (HsForAll _ tele expr)
+  = bindHsForAllTelescope HsTypeCtx tele $ \tele' ->
+    do { (expr', fvs) <- rnLExpr expr
+       ; unlessXOptM LangExt.RequiredTypeArguments $
+         addErr TcRnUnexpectedTypeSyntaxInTerms
+       ; return (HsForAll noExtField tele' expr', fvs) }
+
+rnExpr (HsFunArr _ mult arg res)
+  = do { (arg', fvs1) <- rnLExpr arg
+       ; (mult', fvs2) <- rnHsArrowWith rnLExpr mult
+       ; (res', fvs3) <- rnLExpr res
+       ; unlessXOptM LangExt.RequiredTypeArguments $
+         addErr TcRnUnexpectedTypeSyntaxInTerms
+       ; return (HsFunArr noExtField mult' arg' res', plusFVs [fvs1, fvs2, fvs3]) }
+
 {-
 ************************************************************************
 *                                                                      *

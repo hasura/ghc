@@ -117,6 +117,7 @@ module GHC.Tc.Errors.Types (
   , NonCanonicalDefinition(..)
   , NonCanonical_Monoid(..)
   , NonCanonical_Monad(..)
+  , TypeSyntax(..)
 
     -- * Errors for hs-boot and signature files
   , BadBootDecls(..)
@@ -4314,10 +4315,41 @@ data TcRnMessage where
           $(invisP (varT (newName "blah"))) <- aciton1
           ...
 
-     Test cases:
+     Test cases: T24557a T24557b T24557c T24557d
 
   -}
   TcRnMisplacedInvisPat :: HsTyPat GhcPs -> TcRnMessage
+
+  {- TcRnIllegalTypeSyntax is an error raised when an expression
+     constructed with type syntax (->, =>, forall) occurs in
+     the position that doesn't correspond to required type argument
+     (visible forall).
+
+     Examples:
+
+        f = (Int -> Int)
+
+        g = (forall a. a)
+
+        h = ((Show Int, Eq Bool) => Unit)
+
+        j = show (Int -> Int)
+
+     Test cases: T24159_type_syntax_tc_fail
+  -}
+  TcRnIllegalTypeSyntax :: TypeSyntax -> TcRnMessage
+
+  {- TcRnUnexpectedTypeSyntaxInTerms is an error that occurs
+     when type syntax is used in terms without -XRequiredTypeArguments
+     extension enabled
+
+     Examples:
+
+       idVis (forall a. forall b -> (a ~ Int, b ~ Bool) => a -> b)
+
+    Test cases: T24159_type_syntax_rn_fail
+  -}
+  TcRnUnexpectedTypeSyntaxInTerms :: TcRnMessage
   deriving Generic
 
 ----
@@ -6789,3 +6821,9 @@ data TcRnNoDerivStratSpecifiedInfo where
     :: AssumedDerivingStrategy
     -> LHsSigWcType GhcRn -- ^ The instance signature (e.g @Show a => Show (T a)@)
     -> TcRnNoDerivStratSpecifiedInfo
+
+data TypeSyntax
+  = ContextArrowSyntax
+  | FunctionArrowSyntax
+  | ForallTelescopeSyntax
+  deriving Generic

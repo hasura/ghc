@@ -31,11 +31,14 @@ import GHC.Utils.Misc
 import GHC.Data.FastString
 import GHC.Data.Maybe (catMaybes)
 import GHC.Hs.Expr (prependQualified, HsExpr(..), HsLamVariant(..), lamCaseKeyword)
-import GHC.Hs.Type (pprLHsContext)
+import GHC.Hs.Type (pprLHsContext, pprHsArrow, pprHsForAll)
 import GHC.Builtin.Names (allNameStringList)
 import GHC.Builtin.Types (filterCTuple)
 import qualified GHC.LanguageExtensions as LangExt
 import Data.List.NonEmpty (NonEmpty((:|)))
+import GHC.Hs.Pat (Pat(..), LPat)
+import GHC.Hs.Extension
+import GHC.Parser.Annotation (noAnn)
 
 
 instance Diagnostic PsMessage where
@@ -121,9 +124,29 @@ instance Diagnostic PsMessage where
       -> mkSimpleDecorated $
             text "Found" <+> quotes (text "qualified")
              <+> text "in prepositive position"
-    PsWarnViewPatternSignatures
+    PsWarnViewPatternSignatures pat sig
       -> mkSimpleDecorated $
-            text "TODO PsWarnViewPatternSignatures message"
+             text "Found an unparenthesized pattern signature on the RHS of a view pattern."
+          $$ text "This code will stop working in a future GHC release"
+          $$ text "due to a planned change to the precedence of view patterns,"
+          $$ text "unless the view function is an endofunction."
+          $$ nest 2
+              (vcat
+                [ text "Current parse:" <+> quotes (ppr old)
+                , text "Future parse:" <+> quotes (ppr new)
+                ])
+        where
+          new :: LPat GhcPs
+          new = mk_sig_pat (pat_in_parens pat)
+
+          old :: LPat GhcPs
+          old = go_old pat
+
+          go_old (L l (ViewPat x e p)) = L l (ViewPat x e (go_old p))
+          go_old p = pat_in_parens (mk_sig_pat p)
+
+          mk_sig_pat p = L noAnn $ SigPat noAnn p sig
+          pat_in_parens p = L noAnn (ParPat noAnn p)
 
     PsErrLexer err kind
       -> mkSimpleDecorated $ hcat
@@ -347,11 +370,6 @@ instance Diagnostic PsMessage where
            [ text "Arrow command found where an expression was expected:"
            , nest 2 (ppr c)
            ]
-    PsErrViewPatInExpr a b
-      -> mkSimpleDecorated $
-           sep [ text "View pattern in expression context:"
-               , nest 4 (ppr a <+> text "->" <+> ppr b)
-               ]
     PsErrOrPatInExpr p
       -> mkSimpleDecorated $
            sep [ text "Or pattern in expression context:"
@@ -539,6 +557,17 @@ instance Diagnostic PsMessage where
         [ text "Unboxed sum data constructors are not supported in types."
         , text "Use" <+> quotes (text "Sum<n># a b c ...") <+> text "to refer to the type constructor."
         ]
+    PsErrTypeSyntaxInPat ctx
+      -> mkSimpleDecorated $ vcat
+        [ text "Illegal" <+> what <+> "in pattern"
+        , text "Type syntax in patterns isn't supported at the time"]
+        where
+          what = case ctx of
+            PETS_FunctionArrow arg arr res -> text "function arrow:" <+> quotes (ppr arg <+> pprHsArrow arr <+> ppr res)
+            PETS_Multiplicity tok p -> text "multiplicity annotation:" <+> quotes (ppr tok <> ppr p)
+            PETS_ForallTelescope tele body -> text "forall telescope:" <+> quotes (pprHsForAll tele Nothing <+> ppr body)
+            PETS_ConstraintContext ctx -> text "constraint context:" <+> quotes (ppr ctx)
+            PETS_ConstraintArrow -> text "constraint arrow" -- Actually should be unreachable code path
 
     PsErrIllegalOrPat pat
       -> mkSimpleDecorated $ vcat [text "Illegal or-pattern:" <+> ppr (unLoc pat)]
@@ -558,7 +587,7 @@ instance Diagnostic PsMessage where
     PsWarnUnrecognisedPragma{}                    -> WarningWithFlag Opt_WarnUnrecognisedPragmas
     PsWarnMisplacedPragma{}                       -> WarningWithFlag Opt_WarnMisplacedPragmas
     PsWarnImportPreQualified                      -> WarningWithFlag Opt_WarnPrepositiveQualifiedModule
-    PsWarnViewPatternSignatures                   -> WarningWithFlag Opt_WarnViewPatternSignatures
+    PsWarnViewPatternSignatures{}                 -> WarningWithFlag Opt_WarnViewPatternSignatures
     PsErrLexer{}                                  -> ErrorWithoutFlag
     PsErrCmmLexer                                 -> ErrorWithoutFlag
     PsErrCmmParser{}                              -> ErrorWithoutFlag
@@ -620,7 +649,6 @@ instance Diagnostic PsMessage where
     PsErrArrowExprInPat{}                         -> ErrorWithoutFlag
     PsErrArrowCmdInPat{}                          -> ErrorWithoutFlag
     PsErrArrowCmdInExpr{}                         -> ErrorWithoutFlag
-    PsErrViewPatInExpr{}                          -> ErrorWithoutFlag
     PsErrOrPatInExpr{}                            -> ErrorWithoutFlag
     PsErrCaseCmdInFunAppCmd{}                     -> ErrorWithoutFlag
     PsErrLambdaCmdInFunAppCmd{}                   -> ErrorWithoutFlag
@@ -661,6 +689,7 @@ instance Diagnostic PsMessage where
     PsErrUnicodeCharLooksLike{}                   -> ErrorWithoutFlag
     PsErrInvalidPun {}                            -> ErrorWithoutFlag
     PsErrIllegalOrPat{}                           -> ErrorWithoutFlag
+    PsErrTypeSyntaxInPat{}                        -> ErrorWithoutFlag
 
   diagnosticHints = \case
     PsUnknownMessage m                            -> diagnosticHints m
@@ -683,7 +712,7 @@ instance Diagnostic PsMessage where
     PsWarnMisplacedPragma{}                       -> [SuggestPlacePragmaInHeader]
     PsWarnImportPreQualified                      -> [ SuggestQualifiedAfterModuleName
                                                      , suggestExtension LangExt.ImportQualifiedPost]
-    PsWarnViewPatternSignatures                   -> noHints
+    PsWarnViewPatternSignatures{}                 -> [SuggestParenthesizePatternRHS]
     PsErrLexer{}                                  -> noHints
     PsErrCmmLexer                                 -> noHints
     PsErrCmmParser{}                              -> noHints
@@ -757,7 +786,6 @@ instance Diagnostic PsMessage where
     PsErrArrowExprInPat{}                         -> noHints
     PsErrArrowCmdInPat{}                          -> noHints
     PsErrArrowCmdInExpr{}                         -> noHints
-    PsErrViewPatInExpr{}                          -> noHints
     PsErrOrPatInExpr{}                            -> noHints
     PsErrLambdaCmdInFunAppCmd{}                   -> suggestParensAndBlockArgs
     PsErrCaseCmdInFunAppCmd{}                     -> suggestParensAndBlockArgs
@@ -830,6 +858,7 @@ instance Diagnostic PsMessage where
     PsErrUnicodeCharLooksLike{}                   -> noHints
     PsErrInvalidPun {}                            -> [suggestExtension LangExt.ListTuplePuns]
     PsErrIllegalOrPat{}                           -> [suggestExtension LangExt.OrPatterns]
+    PsErrTypeSyntaxInPat{}                        ->  noHints
 
   diagnosticCode = constructorCode
 
