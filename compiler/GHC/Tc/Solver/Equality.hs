@@ -3011,10 +3011,8 @@ tryFunDeps eq_rel work_item@(EqCt { eq_lhs = lhs, eq_ev = ev })
 improveTopFunEqs :: TyCon -> [TcType] -> EqCt -> TcS Bool
 -- See Note [FunDep and implicit parameter reactions]
 improveTopFunEqs fam_tc args (EqCt { eq_ev = ev, eq_rhs = rhs_ty })
-  | isGiven ev
-  = improveGivenTopFunEqs fam_tc args ev rhs_ty
-  | otherwise
-  = improveWantedTopFunEqs fam_tc args ev rhs_ty
+  | isGiven ev = improveGivenTopFunEqs  fam_tc args ev rhs_ty
+  | otherwise  = improveWantedTopFunEqs fam_tc args ev rhs_ty
 
 improveGivenTopFunEqs :: TyCon -> [TcType] -> CtEvidence -> Xi -> TcS Bool
 improveGivenTopFunEqs fam_tc args ev rhs_ty
@@ -3122,12 +3120,52 @@ improve_top_fun_eqs fam_envs fam_tc args rhs_ty
 
 
 improveLocalFunEqs :: InertCans -> TyCon -> [TcType] -> EqCt -> TcS Bool
--- Generate improvement equalities, by comparing
+improveLocalFunEqs inerts fam_tc args (EqCt { eq_ev = work_ev, eq_rhs = rhs })
+  | isGiven work_ev = improveGivenLocalFunEqs  funeqs_for_tc fam_tc args work_ev rhs
+  | otherwise       = improveWantedLocalFunEqs funeqs_for_tc fam_tc args work_ev rhs
+  where
+    funeqs = inert_funeqs inerts
+    funeqs_for_tc :: [EqCt]
+    funeqs_for_tc = [ funeq_ct | equal_ct_list <- findFunEqsByTyCon funeqs fam_tc
+                               , funeq_ct <- equal_ct_list
+                               , NomEq == eq_eq_rel funeq_ct ]
+                                  -- Representational equalities don't interact
+                                  -- with type family dependencies
+
+
+improveGivenLocalFunEqs :: TyCon -> [TcType] -> CtEvidence -> Xi  -- Work item
+                        -> [EqCt]                                 -- Inert items
+                        -> TcS Bool  -- True <=> Something was emitted
+improveGivenLocalFunEqs funeqs_for_tc fam_tc work_args work_ev work_rhs
+  | Just ops <- isBuiltInSynFamTyCon_maybe fam_tc
+  = foldlM (do_one ops) False fun_eqs_for_tc
+  | otherwise
+  = return False
+  where
+    do_one ops so_far (EqCt { eq_ev = inert_ev
+                            , eq_lhs = TyFamLHS _ inert_args
+                            , eq_rhs = inert_rhs })
+      | isGiven inert_ev, not (null quads)
+      = do { emitNewGivens (ctEvLoc ev) quads; return True }
+
+     | otherwise
+     = return so_far
+  where
+    given_co :: Coercion = ctEvCoercion work_ev
+
+    quads = [ (Nominal, s, t, new_co)
+            | (ax, Pair s t) <- tryInteractInertFam ops fam_tc
+                                    work_args  work_rhs inert_args inert_rhs
+            , let new_co = mkAxiomRuleCo ax [given_co] ]
+
+improveWantedLocalFunEqs :: [EqCt] -> TyCon -> [TcType]
+                         -> CtEvidence -> Xi -> TcS Bool
+-- Generate improvement equalities for a Watend constraint, by comparing
 -- the current work item with inert CFunEqs
 -- E.g.   x + y ~ z,   x + y' ~ z   =>   [W] y ~ y'
 --
 -- See Note [FunDep and implicit parameter reactions]
-improveLocalFunEqs inerts fam_tc args (EqCt { eq_ev = work_ev, eq_rhs = rhs })
+improveWantedLocalFunEqs fun_eqs_for_tc fam_tc args work_ev rhs
   | null improvement_eqns
   = return False
   | otherwise
@@ -3137,13 +3175,6 @@ improveLocalFunEqs inerts fam_tc args (EqCt { eq_ev = work_ev, eq_rhs = rhs })
                         , text "Inert eqs:" <+> ppr (inert_eqs inerts) ]
        ; emitFunDepWanteds work_ev improvement_eqns }
   where
-    funeqs        = inert_funeqs inerts
-    funeqs_for_tc :: [EqCt]
-    funeqs_for_tc = [ funeq_ct | equal_ct_list <- findFunEqsByTyCon funeqs fam_tc
-                               , funeq_ct <- equal_ct_list
-                               , NomEq == eq_eq_rel funeq_ct ]
-                                  -- representational equalities don't interact
-                                  -- with type family dependencies
     work_loc      = ctEvLoc work_ev
     work_pred     = ctEvPred work_ev
     fam_inj_info  = tyConInjectivityInfo fam_tc
@@ -3164,11 +3195,7 @@ improveLocalFunEqs inerts fam_tc args (EqCt { eq_ev = work_ev, eq_rhs = rhs })
 
     --------------------
     do_one_built_in ops rhs (EqCt { eq_lhs = TyFamLHS _ iargs, eq_rhs = irhs, eq_ev = inert_ev })
-      | isGiven inert_ev && isGiven work_ev
-      = []  -- ToDo: fill in
-      | otherwise
       = mk_fd_eqns inert_ev (map snd $ tryInteractInertFam ops fam_tc args rhs iargs irhs)
-
     do_one_built_in _ _ _ = pprPanic "interactFunEq 1" (ppr fam_tc) -- TyVarLHS
 
     --------------------
@@ -3189,14 +3216,12 @@ improveLocalFunEqs inerts fam_tc args (EqCt { eq_ev = work_ev, eq_rhs = rhs })
     mk_fd_eqns inert_ev eqns
       | null eqns  = []
       | otherwise  = [ FDEqn { fd_qtvs = [], fd_eqs = eqns
-                             , fd_pred1 = work_pred
-                             , fd_pred2 = inert_pred
                              , fd_loc   = (loc, inert_rewriters) } ]
       where
         initial_loc  -- start with the location of the Wanted involved
           | isGiven work_ev = inert_loc
           | otherwise       = work_loc
-        eqn_orig        = InjTFOrigin1 work_pred (ctLocOrigin work_loc) (ctLocSpan work_loc)
+        eqn_orig        = InjTFOrigin1 work_pred  (ctLocOrigin work_loc)  (ctLocSpan work_loc)
                                        inert_pred (ctLocOrigin inert_loc) (ctLocSpan inert_loc)
         eqn_loc         = setCtLocOrigin initial_loc eqn_orig
         inert_pred      = ctEvPred inert_ev
