@@ -16,6 +16,7 @@ import GHC.Tc.Instance.FunDeps
 import GHC.Tc.Instance.Class( safeOverlap, matchEqualityInst )
 import GHC.Tc.Types.Evidence
 import GHC.Tc.Types.Constraint
+import GHC.Tc.Types.CtLocEnv
 import GHC.Tc.Types.Origin
 import GHC.Tc.Types.EvTerm( evCallStack )
 import GHC.Tc.Solver.InertSet
@@ -28,7 +29,7 @@ import GHC.Hs.Type( HsIPName(..) )
 
 import GHC.Core
 import GHC.Core.Type
-import GHC.Core.InstEnv     ( DFunInstType )
+import GHC.Core.InstEnv     ( DFunInstType, ClsInst(..) )
 import GHC.Core.Class
 import GHC.Core.Predicate
 import GHC.Core.Multiplicity ( scaledThing )
@@ -39,7 +40,6 @@ import GHC.Types.Name.Set
 import GHC.Types.Var
 import GHC.Types.Id( mkTemplateLocals )
 import GHC.Types.Var.Set
-import GHC.Types.SrcLoc
 import GHC.Types.Var.Env
 
 import GHC.Utils.Monad ( concatMapM, foldlM )
@@ -1681,13 +1681,15 @@ doTopFunDepImprovement dict_ct@(DictCt { di_ev = ev, di_cls = cls, di_tys = xis 
      dict_loc    = ctEvLoc ev
      dict_origin = ctLocOrigin dict_loc
 
-     mk_ct_loc :: PredType   -- From instance decl
-               -> SrcSpan    -- also from instance deol
+     mk_ct_loc :: ClsInst   -- The instance decl
                -> (CtLoc, RewriterSet)
-     mk_ct_loc inst_pred inst_loc
+     mk_ct_loc ispec
        = ( dict_loc { ctl_origin = FunDepOrigin2 dict_pred dict_origin
                                                  inst_pred inst_loc }
          , emptyRewriterSet )
+       where
+         inst_pred = mkClassPred cls (is_tys ispec)
+         inst_loc  = getSrcSpan (is_dfun ispec)
 
 
 {- *********************************************************************

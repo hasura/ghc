@@ -33,7 +33,6 @@ import GHC.Core.Type
 import GHC.Data.Pair
 import GHC.Core.TyCon    ( TyCon, FamTyConFlav(..), mkFamilyTyCon
                          , Injectivity(..) )
-import GHC.Core.Coercion ( Role(..) )
 import GHC.Tc.Types.Constraint ( Xi )
 import GHC.Core.Coercion.Axiom
 import GHC.Core.TyCo.Compare   ( tcEqType )
@@ -250,13 +249,12 @@ typeNatModTyCon = mkTypeNatFunTyCon2 name
   name = mkWiredInTyConName UserSyntax gHC_INTERNAL_TYPENATS (fsLit "Mod")
             typeNatModTyFamNameKey typeNatModTyCon
 
-typeNatExpTyCon :: TyCon
+typeNatExpTyCon :: TyCon  -- Exponentiation
 typeNatExpTyCon = mkTypeNatFunTyCon2 name
   BuiltInSynFamily
     { sfMatchFam      = matchFamExp
-    , sfInteractTop   = sfInteractTopNone
     , sfInteractInert = sfInteractInertNone
---    , sfInteractTop   = interactTopExp
+    , sfInteractTop   = [axExpTop1,axExpTop2,axExpTop3]
 --    , sfInteractInert = interactInertExp
     }
   where
@@ -975,18 +973,18 @@ axMulInteract2  -- (x1*y ~ z, x2*y ~ z) => (x1~x2)   if  y/0
     do { ny1 <- isNumLitTy y1; guard (ny1 /= 0); guard (z1 `tcEqType` z2)
        ; guard (y1 `tcEqType` y2); return (Pair x1 x2) }
 
-{-
-interactTopExp :: [Xi] -> Xi -> [Pair Type]
-interactTopExp [s,t] r
-  | Just 0 <- mbZ = [ s === num 0 ]                                       -- (s ^ t ~ 0) => (s ~ 0)
-  | Just x <- mbX, Just z <- mbZ, Just y <- logExact  z x = [t === num y] -- (2 ^ t ~ 8) => (t ~ 3)
-  | Just y <- mbY, Just z <- mbZ, Just x <- rootExact z y = [s === num x] -- (s ^ 2 ~ 9) => (s ~ 3)
-  where
-  mbX = isNumLitTy s
-  mbY = isNumLitTy t
-  mbZ = isNumLitTy r
-interactTopExp _ _ = []
+axExpTop1, axExpTop2, axExpTop3 :: CoAxiomRule
+axExpTop1   -- (s ^ t ~ 0) => (s ~ 0)
+  = mkTopBinFamDeduction "ExpT1" typeNatExpTyCon $ \ s _t r ->
+    do { 0 <- isNumLitTy r; return (Pair s r) }
+axExpTop2   -- (2 ^ t ~ 8) => (t ~ 3)
+  = mkTopBinFamDeduction "ExpT2" typeNatExpTyCon $ \ s t r ->
+    do { ns <- isNumLitTy s; nr <- isNumLitTy r; y <- logExact nr ns; return (Pair t (num y)) }
+axExpTop3   -- (s ^ 2 ~ 9) => (s ~ 3)
+  = mkTopBinFamDeduction "ExpT3" typeNatExpTyCon $ \ s t r ->
+    do { nt <- isNumLitTy t; nr <- isNumLitTy r; y <- rootExact nr nt; return (Pair s (num y)) }
 
+{-
 interactTopCmpNat :: [Xi] -> Xi -> [Pair Type]
 interactTopCmpNat [s,t] r
   | Just EQ <- isOrderingLitTy r = [ s === t ]

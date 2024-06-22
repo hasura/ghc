@@ -16,6 +16,7 @@ import GHC.Tc.Solver.InertSet
 import GHC.Tc.Solver.Types( findFunEqsByTyCon )
 import GHC.Tc.Types.Evidence
 import GHC.Tc.Types.Constraint
+import GHC.Tc.Types.CtLocEnv
 import GHC.Tc.Types.Origin
 import GHC.Tc.Utils.Unify
 import GHC.Tc.Utils.TcType
@@ -1340,7 +1341,7 @@ canDecomposableTyConAppOK ev eq_rel tc (ty1,tys1) (ty2,tys2)
                    -- Remember: ty1/ty2 may be more fully zonked than evar
                    --           See the call to canonicaliseEquality in solveEquality.
              -> emitNewGivens loc
-                       [ (r, ty1, ty2, mkSelCo (SelTyCon i r) ev_co)
+                       [ (r, mkSelCo (SelTyCon i r) ev_co)
                        | (r, ty1, ty2, i) <- zip4 tc_roles tys1 tys2 [0..]
                        , r /= Phantom
                        , not (isCoercionTy ty1) && not (isCoercionTy ty2) ]
@@ -1398,10 +1399,8 @@ canDecomposableFunTy ev eq_rel af f1@(ty1,m1,a1,r1) f2@(ty2,m2,a2,r2)
                    -- Remember: ty1/ty2 may be more fully zonked than evar
                    --           See the call to canonicaliseEquality in solveEquality.
              -> emitNewGivens loc
-                       [ (funRole role fs, ty1, ty2, mkSelCo (SelFun fs) ev_co)
-                       | (fs, ty1, ty2) <- [ (SelMult, m1, m2)
-                                           , (SelArg,  a1, a2)
-                                           , (SelRes,  r1, r2)] ]
+                       [ (funRole role fs, mkSelCo (SelFun fs) ev_co)
+                       | fs <- [SelMult, SelArg, SelRes] ]
 
     ; stopWith ev "Decomposed TyConApp" }
 
@@ -3018,8 +3017,8 @@ improveGivenTopFunEqs :: TyCon -> [TcType] -> CtEvidence -> Xi -> TcS Bool
 improveGivenTopFunEqs fam_tc args ev rhs_ty
   | Just ops <- isBuiltInSynFamTyCon_maybe fam_tc
   = do { emitNewGivens (ctEvLoc ev) $
-           [ (Nominal, s, t, new_co)
-           | (ax, Pair s t) <- tryInteractTopFam ops fam_tc args rhs_ty
+           [ (Nominal, new_co)
+           | (ax, _) <- tryInteractTopFam ops fam_tc args rhs_ty
            , let new_co = mkAxiomRuleCo ax [given_co] ]
        ; return False }
   | otherwise
@@ -3120,12 +3119,13 @@ improve_top_fun_eqs fam_envs fam_tc args rhs_ty
 
 
 improveLocalFunEqs :: InertCans -> TyCon -> [TcType] -> EqCt -> TcS Bool
+-- Emit equalities from interaction between two equalities
 improveLocalFunEqs inerts fam_tc args (EqCt { eq_ev = work_ev, eq_rhs = rhs })
   | isGiven work_ev = improveGivenLocalFunEqs  funeqs_for_tc fam_tc args work_ev rhs
   | otherwise       = improveWantedLocalFunEqs funeqs_for_tc fam_tc args work_ev rhs
   where
     funeqs = inert_funeqs inerts
-    funeqs_for_tc :: [EqCt]
+    funeqs_for_tc :: [EqCt]   -- Mixture of Given and Wanted
     funeqs_for_tc = [ funeq_ct | equal_ct_list <- findFunEqsByTyCon funeqs fam_tc
                                , funeq_ct <- equal_ct_list
                                , NomEq == eq_eq_rel funeq_ct ]
@@ -3133,46 +3133,53 @@ improveLocalFunEqs inerts fam_tc args (EqCt { eq_ev = work_ev, eq_rhs = rhs })
                                   -- with type family dependencies
 
 
-improveGivenLocalFunEqs :: TyCon -> [TcType] -> CtEvidence -> Xi  -- Work item
-                        -> [EqCt]                                 -- Inert items
+improveGivenLocalFunEqs :: [EqCt]    -- Inert items, mixture of Given and Wanted
+                        -> TyCon -> [TcType] -> CtEvidence -> Xi  -- Work item
                         -> TcS Bool  -- True <=> Something was emitted
+-- Emit equalities from interaction between two Given type-family equalities
+--    e.g.    (x+y1~z, x+y2~z) => (y1 ~ y2)
 improveGivenLocalFunEqs funeqs_for_tc fam_tc work_args work_ev work_rhs
   | Just ops <- isBuiltInSynFamTyCon_maybe fam_tc
-  = foldlM (do_one ops) False fun_eqs_for_tc
+  = foldlM (do_one ops) False funeqs_for_tc
   | otherwise
   = return False
   where
-    do_one ops so_far (EqCt { eq_ev = inert_ev
-                            , eq_lhs = TyFamLHS _ inert_args
-                            , eq_rhs = inert_rhs })
-      | isGiven inert_ev, not (null quads)
-      = do { emitNewGivens (ctEvLoc ev) quads; return True }
-
-     | otherwise
-     = return so_far
-  where
     given_co :: Coercion = ctEvCoercion work_ev
 
-    quads = [ (Nominal, s, t, new_co)
-            | (ax, Pair s t) <- tryInteractInertFam ops fam_tc
-                                    work_args  work_rhs inert_args inert_rhs
-            , let new_co = mkAxiomRuleCo ax [given_co] ]
+    do_one :: BuiltInSynFamily -> Bool -> EqCt -> TcS Bool
+    do_one ops _ (EqCt { eq_ev = inert_ev
+                        , eq_lhs = TyFamLHS _ inert_args
+                        , eq_rhs = inert_rhs })
+      | isGiven inert_ev
+      , not (null pairs)
+      = do { emitNewGivens (ctEvLoc inert_ev) pairs; return True }
+             -- This CtLoc for the new Givens doesn't reflect the
+             -- fact that it's a combination of Givens, but I don't
+             -- this that matters.
+      where
+        pairs = [ (Nominal, new_co)
+                | (ax, _) <- tryInteractInertFam ops fam_tc
+                                        work_args  work_rhs inert_args inert_rhs
+                , let new_co = mkAxiomRuleCo ax [given_co] ]
 
-improveWantedLocalFunEqs :: [EqCt] -> TyCon -> [TcType]
-                         -> CtEvidence -> Xi -> TcS Bool
--- Generate improvement equalities for a Watend constraint, by comparing
--- the current work item with inert CFunEqs
+    do_one _ so_far _ = return so_far
+
+improveWantedLocalFunEqs
+    :: [EqCt]     -- Inert items (Given and Wanted)
+    -> TyCon -> [TcType] -> CtEvidence -> Xi  -- Work item (wanted)
+    -> TcS Bool
+-- Emit improvement equalities for a Wanted constraint, by comparing
+-- the current work item with inert CFunEqs (boh Given and Wanted)
 -- E.g.   x + y ~ z,   x + y' ~ z   =>   [W] y ~ y'
 --
 -- See Note [FunDep and implicit parameter reactions]
-improveWantedLocalFunEqs fun_eqs_for_tc fam_tc args work_ev rhs
+improveWantedLocalFunEqs funeqs_for_tc fam_tc args work_ev rhs
   | null improvement_eqns
   = return False
   | otherwise
   = do { traceTcS "interactFunEq improvements: " $
                    vcat [ text "Eqns:" <+> ppr improvement_eqns
-                        , text "Candidates:" <+> ppr funeqs_for_tc
-                        , text "Inert eqs:" <+> ppr (inert_eqs inerts) ]
+                        , text "Candidates:" <+> ppr funeqs_for_tc ]
        ; emitFunDepWanteds work_ev improvement_eqns }
   where
     work_loc      = ctEvLoc work_ev

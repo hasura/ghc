@@ -24,7 +24,6 @@ where
 
 import GHC.Prelude
 
-import GHC.Types.Name
 import GHC.Types.Var
 import GHC.Core.Class
 import GHC.Core.Predicate
@@ -42,7 +41,6 @@ import GHC.Tc.Utils.TcType( transSuperClasses )
 
 import GHC.Types.Var.Set
 import GHC.Types.Var.Env
-import GHC.Types.SrcLoc
 
 import GHC.Utils.Outputable
 import GHC.Utils.FV
@@ -231,15 +229,14 @@ improveFromAnother _ _ _ = []
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 improveFromInstEnv :: InstEnvs
-                   -> (PredType -> SrcSpan -> loc)
+                   -> (ClsInst -> loc)
                    -> Class -> [Type]
                    -> [FunDepEqn loc] -- Needs to be a FunDepEqn because
                                       -- of quantified variables
 -- See Note [Improving against instances]
 -- Post: Equations oriented from the template (matching instance) to the workitem!
 improveFromInstEnv inst_env mk_loc cls tys
-  = [ FDEqn { fd_qtvs = meta_tvs, fd_eqs = eqs
-            , fd_loc = mk_loc p_inst (getSrcSpan (is_dfun ispec)) }
+  = [ FDEqn { fd_qtvs = meta_tvs, fd_eqs = eqs, fd_loc = mk_loc ispec }
     | fd <- cls_fds             -- Iterate through the fundeps first,
                                 -- because there often are none!
     , let trimmed_tcs = trimRoughMatchTcs cls_tvs fd rough_tcs
