@@ -32,7 +32,7 @@ import GHC.Prelude
 import GHC.Core.Type
 import GHC.Data.Pair
 import GHC.Core.TyCon    ( TyCon, FamTyConFlav(..), mkFamilyTyCon
-                         , Injectivity(..) )
+                         , Injectivity(..), isBuiltInSynFamTyCon_maybe )
 import GHC.Core.Coercion.Axiom
 import GHC.Core.TyCo.Compare   ( tcEqType )
 import GHC.Types.Name          ( Name, BuiltInSyntax(..) )
@@ -192,6 +192,57 @@ typeNatTyCons =
   , typeCharToNatTyCon
   , typeNatToCharTyCon
   ]
+
+
+tyConAxiomRules :: TyCon -> [CoAxiomRule]
+tyConAxiomRules tc
+  | Just ops <- isBuiltInSynFamTyCon_maybe tc
+  = sfInteractTop ops ++ sfInteractInert ops
+  | otherwise
+  = []
+
+-- The list of built-in type family axioms that GHC uses.
+-- If you define new axioms, make sure to include them in this list.
+-- See Note [Adding built-in type families]
+typeNatCoAxiomRules :: UniqFM FastString CoAxiomRule
+typeNatCoAxiomRules = listToUFM $ map (\x -> (coaxrName x, x)) $
+  concatMap tyConAxiomRules typeNatTyCons
+     -- ToDO: tyConAxiomRules should get the sfMatchFam rules too
+  ++
+  [ axAddDef
+  , axMulDef
+  , axExpDef
+  , axCmpNatDef
+  , axCmpSymbolDef
+  , axCmpCharDef
+  , axAppendSymbolDef
+  , axConsSymbolDef
+  , axUnconsSymbolDef
+  , axCharToNatDef
+  , axNatToCharDef
+  , axAdd0L
+  , axAdd0R
+  , axMul0L
+  , axMul0R
+  , axMul1L
+  , axMul1R
+  , axExp1L
+  , axExp0R
+  , axExp1R
+  , axCmpNatRefl
+  , axCmpSymbolRefl
+--  , axCmpCharRefl
+  , axSubDef
+  , axSub0R
+  , axAppendSymbol0R
+  , axAppendSymbol0L
+  , axDivDef
+  , axDiv1
+  , axModDef
+  , axMod1
+  , axLogDef
+  ]
+
 
 -------------------------------------------------------------------------------
 --                   Addition (+)
@@ -896,46 +947,6 @@ axAppendSymbol0R  = mkAxiom1 "Concat0R"
                     $ \(Pair s t) -> (mkStrLitTy nilFS `appendSymbol` s) === t
 axAppendSymbol0L  = mkAxiom1 "Concat0L"
                     $ \(Pair s t) -> (s `appendSymbol` mkStrLitTy nilFS) === t
-
--- The list of built-in type family axioms that GHC uses.
--- If you define new axioms, make sure to include them in this list.
--- See Note [Adding built-in type families]
-typeNatCoAxiomRules :: UniqFM FastString CoAxiomRule
-typeNatCoAxiomRules = listToUFM $ map (\x -> (coaxrName x, x))
-  [ axAddDef
-  , axMulDef
-  , axExpDef
-  , axCmpNatDef
-  , axCmpSymbolDef
-  , axCmpCharDef
-  , axAppendSymbolDef
-  , axConsSymbolDef
-  , axUnconsSymbolDef
-  , axCharToNatDef
-  , axNatToCharDef
-  , axAdd0L
-  , axAdd0R
-  , axMul0L
-  , axMul0R
-  , axMul1L
-  , axMul1R
-  , axExp1L
-  , axExp0R
-  , axExp1R
-  , axCmpNatRefl
-  , axCmpSymbolRefl
---  , axCmpCharRefl
-  , axSubDef
-  , axSub0R
-  , axAppendSymbol0R
-  , axAppendSymbol0L
-  , axDivDef
-  , axDiv1
-  , axModDef
-  , axMod1
-  , axLogDef
-  ]
-
 
 
 {-------------------------------------------------------------------------------
