@@ -1128,7 +1128,7 @@ mkTopBinFamDeduction :: String -> TyCon
 mkTopBinFamDeduction str fam_tc f
   = CoAxiomRule
     { coaxrName      = fsLit str
-    , coaxrAsmpRoles = [Nominal, Nominal]
+    , coaxrAsmpRoles = [Nominal]
     , coaxrRole      = Nominal
     , coaxrProves    = \cs -> do { [Pair lhs rhs] <- return cs
                                  ; (tc, [a,b]) <- splitTyConApp_maybe lhs
