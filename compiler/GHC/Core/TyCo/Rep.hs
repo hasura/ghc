@@ -1556,8 +1556,8 @@ Here,
  * uco_role, uco_lty, uco_rty express the type of the coercoin
  * uco_prov says where it came from
  * uco_deps specifies the coercions on which this proof (which is not
-   explicity given) depends.  See 
-
+   explicity given) depends. See
+   Note [The importance of tracking UnivCo dependencies]
 -}
 
 -- | For simplicity, we have just one UnivCo that represents a coercion from

@@ -1773,7 +1773,8 @@ newBoundEvVarId pred rhs
 
 emitNewGivens :: CtLoc -> [(Role,TcCoercion)] -> TcS ()
 emitNewGivens loc pts
-  = do { evs <- mapM (newGivenEvVar loc) $
+  = do { traceTcS "emitNewGivens" (ppr pts)
+       ; evs <- mapM (newGivenEvVar loc) $
                 [ (mkPrimEqPredRole role ty1 ty2, evCoercion co)
                 | (role, co) <- pts
                 , let Pair ty1 ty2 = coercionKind co

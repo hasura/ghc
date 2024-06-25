@@ -49,9 +49,9 @@ mkCoercionType :: Role -> Type -> Type -> Type
 
 seqCo :: Coercion -> ()
 
-coercionKind :: Coercion -> Pair Type
-coercionLKind :: Coercion -> Type
-coercionRKind :: Coercion -> Type
+coercionKind  :: HasDebugCallStack => Coercion -> Pair Type
+coercionLKind :: HasDebugCallStack => Coercion -> Type
+coercionRKind :: HasDebugCallStack => Coercion -> Type
 coercionType :: Coercion -> Type
 
 topNormaliseNewType_maybe :: Type -> Maybe (Coercion, Type)

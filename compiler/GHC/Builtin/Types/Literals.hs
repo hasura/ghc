@@ -273,19 +273,19 @@ axAddTops :: [CoAxiomRule]
 axAddTops
   = [ -- (s + t ~ 0) => (s ~ 0)
       mkTopBinFamDeduction "AddT-0L" typeNatAddTyCon $ \ a _b r ->
-      do { known r (== 0); return (Pair a (num 0)) }
+      do { _ <- known r (== 0); return (Pair a (num 0)) }
 
     , -- (s + t ~ 0) => (t ~ 0)
       mkTopBinFamDeduction "AddT-0R" typeNatAddTyCon $ \ _a b r ->
-      do { known r (== 0); return (Pair b (num 0)) }
+      do { _ <- known r (== 0); return (Pair b (num 0)) }
 
     , -- (5 + t ~ 8) => (t ~ 3)
       mkTopBinFamDeduction "AddT-KKL" typeNatAddTyCon $ \ a b r ->
-      do { na <- isNumLitTy a; nr <- isNumLitTy r; return (Pair b (num (nr-na))) }
+      do { na <- isNumLitTy a; nr <- known r (>= na); return (Pair b (num (nr-na))) }
 
     , -- (s + 5 ~ 8) => (s ~ 3)
       mkTopBinFamDeduction "AddT-KKR" typeNatAddTyCon $ \ a b r ->
-      do { nb <- isNumLitTy b; nr <- isNumLitTy r; return (Pair a (num (nr-nb))) } ]
+      do { nb <- isNumLitTy b; nr <- known r (>= nb); return (Pair a (num (nr-nb))) } ]
 
 axAddInteracts :: [CoAxiomRule]
 axAddInteracts
@@ -405,11 +405,11 @@ axMulTops :: [CoAxiomRule]
 axMulTops
   = [ -- (s * t ~ 1)  => (s ~ 1)
       mkTopBinFamDeduction "MulT1" typeNatMulTyCon $ \ s _t r ->
-      do { known r (== 1); return (Pair s r) }
+      do { _ <- known r (== 1); return (Pair s r) }
 
     , -- (s * t ~ 1)  => (t ~ 1)
       mkTopBinFamDeduction "MulT2" typeNatMulTyCon $ \ _s t r ->
-      do { known r (== 1); return (Pair t r) }
+      do { _ <- known r (== 1); return (Pair t r) }
 
     , -- (3 * t ~ 15) => (t ~ 5)
       mkTopBinFamDeduction "MulT3" typeNatMulTyCon $ \ s t r ->
@@ -423,11 +423,11 @@ axMulInteracts :: [CoAxiomRule]
 axMulInteracts
   = [ -- (x*y1 ~ z, x*y2 ~ z) => (y1~y2)   if x/=0
       mkInteractBinFamDeduction "MulI1" typeNatMulTyCon $ \ x1 y1 z1 x2 y2 z2 ->
-      do { known x1 (/= 0); same x1 x2; same z1 z2; return (Pair y1 y2) }
+      do { nx1 <- known x1 (/= 0); _ <- known x2 (== nx1); same z1 z2; return (Pair y1 y2) }
 
     , -- (x1*y ~ z, x2*y ~ z) => (x1~x2)   if  y/0
       mkInteractBinFamDeduction "MulI2" typeNatMulTyCon $ \ x1 y1 z1 x2 y2 z2 ->
-      do { known y1 (/= 0); same y1 y2; same z1 z2; return (Pair x1 x2) } ]
+      do { ny1 <- known y1 (/= 0); _ <- known y2 (== ny1); same z1 z2; return (Pair x1 x2) } ]
 
 
 -------------------------------------------------------------------------------
@@ -480,8 +480,8 @@ typeNatExpTyCon :: TyCon  -- Exponentiation
 typeNatExpTyCon = mkTypeNatFunTyCon2 name
   BuiltInSynFamily
     { sfMatchFam      = matchFamExp
-    , sfInteractInert = axExpTops
-    , sfInteractTop   = axExpInteracts
+    , sfInteractTop   = axExpTops
+    , sfInteractInert = axExpInteracts
     }
   where
   name = mkWiredInTyConName UserSyntax gHC_INTERNAL_TYPENATS (fsLit "^")
@@ -516,13 +516,11 @@ axExpInteracts :: [CoAxiomRule]
 axExpInteracts
   = [ -- (x1^y1 ~ z, x2^y2 ~ z) {x1=x2, x1>1}=> (y1~y2)
       mkInteractBinFamDeduction "ExpI1" typeNatExpTyCon $ \ x1 y1 z1 x2 y2 z2 ->
-      do { known x1 (> 1); same x1 x2; same z1 z2; return (Pair y1 y2) }
+      do { nx1 <- known x1 (> 1); _ <- known x2 (== nx1); same z1 z2; return (Pair y1 y2) }
 
     , -- (x1^y1 ~ z, x2^y2 ~ z) {y1=y2, y1>0}=> (x1~x2)
       mkInteractBinFamDeduction "ExpI2" typeNatExpTyCon $ \ x1 y1 z1 x2 y2 z2 ->
-      do { known y1 (> 0); same y1 y2; same z1 z2; return (Pair x1 x2) } ]
-
-
+      do { ny1 <- known y1 (> 0); _ <- known y2 (== ny1); same z1 z2; return (Pair x1 x2) } ]
 -------------------------------------------------------------------------------
 --                   Logarithm: Log2
 -------------------------------------------------------------------------------
@@ -1162,8 +1160,8 @@ injCheck x1 x2 y1 y2 z1 z2
 same :: Type -> Type -> Maybe ()
 same ty1 ty2 = guard (ty1 `tcEqType` ty2)
 
-known :: Type -> (Integer -> Bool) -> Maybe ()
-known x p = do { nx <- isNumLitTy x; guard (p nx) }
+known :: Type -> (Integer -> Bool) -> Maybe Integer
+known x p = do { nx <- isNumLitTy x; guard (p nx); return nx }
 
 charToInteger :: Char -> Integer
 charToInteger c = fromIntegral (Char.ord c)
@@ -1274,7 +1272,7 @@ typeCharCmpTyCon =
                   typeCharCmpTyFamNameKey typeCharCmpTyCon
   ops = BuiltInSynFamily
       { sfMatchFam      = matchFamCmpChar
-      , sfInteractTop   = [axCmpCharTop]
+      , sfInteractTop   = axCmpCharTops
       , sfInteractInert = []
       }
 
@@ -1296,10 +1294,11 @@ axCmpCharDef = mkBinAxiom "CmpCharDef" typeCharCmpTyCon isCharLitTy isCharLitTy 
 axCmpCharRefl = mkAxiom1 "CmpCharRefl" $
                 \(Pair s _) -> (cmpChar s s) === ordering EQ
 
-axCmpCharTop :: CoAxiomRule
-axCmpCharTop -- (CmpChar s t ~ EQ) => s ~ t
-  = mkTopBinFamDeduction "CmpCharT" typeCharCmpTyCon $ \ s t r ->
-    do { EQ <- isOrderingLitTy r; return (Pair s t) }
+axCmpCharTops :: [CoAxiomRule]
+axCmpCharTops
+  = [  -- (CmpChar s t ~ EQ) => s ~ t
+      mkTopBinFamDeduction "CmpCharT" typeCharCmpTyCon $ \ s t r ->
+      do { EQ <- isOrderingLitTy r; return (Pair s t) } ]
 
 
 

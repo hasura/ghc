@@ -2446,10 +2446,10 @@ coercionType co = case coercionKindRole co of
 --
 -- i.e. the kind of @c@ relates @t1@ and @t2@, then @coercionKind c = Pair t1 t2@.
 
-coercionKind :: Coercion -> Pair Type
+coercionKind :: HasDebugCallStack => Coercion -> Pair Type
 coercionKind co = Pair (coercionLKind co) (coercionRKind co)
 
-coercionLKind :: Coercion -> Type
+coercionLKind :: HasDebugCallStack => Coercion -> Type
 coercionLKind co
   = go co
   where
@@ -2494,7 +2494,7 @@ coercionLKind co
     go_app (InstCo co arg) args = go_app co (go arg:args)
     go_app co              args = piResultTys (go co) args
 
-coercionRKind :: Coercion -> Type
+coercionRKind :: HasDebugCallStack => Coercion -> Type
 coercionRKind co
   = go co
   where

@@ -2953,13 +2953,10 @@ tryFamFamInjectivity ev eq_rel fun_tc1 fun_args1 fun_tc2 fun_args2 mco
   = return False   -- Injectivity applies only for Nominal equalities
   | fun_tc1 /= fun_tc2
   = return False   -- If the families don't match, stop.
-  | isGiven ev
-  = return False   -- See Note [No Given/Given fundeps] in GHC.Tc.Solver.Dict
-
-  -- So this is a [W] (F tys1 ~N# F tys2)
 
   -- Is F an injective type family
-  | Injective inj <- tyConInjectivityInfo fun_tc1
+  | isWanted ev   -- Injectivity conditions only work for Wanteds
+  , Injective inj <- tyConInjectivityInfo fun_tc1
   = unifyFunDeps ev Nominal $ \uenv ->
     uPairsTcM uenv [ Pair ty1 ty2
                    | (ty1,ty2,True) <- zip3 fun_args1 fun_args2 inj ]
@@ -2970,6 +2967,8 @@ tryFamFamInjectivity ev eq_rel fun_tc1 fun_args1 fun_tc2 fun_args2 mco
     -- be a burden to make sure the new entry point and existing ones
     -- were internally consistent. This is slightly distasteful, but
     -- it works well in practice and localises the problem.  Ugh.
+    --
+    -- This path works both Wanteds and Givens
   | Just ops <- isBuiltInSynFamTyCon_maybe fun_tc1
   = let tc_kind = tyConKind fun_tc1
         ki1 = piResultTys tc_kind fun_args1
@@ -2985,8 +2984,12 @@ tryFamFamInjectivity ev eq_rel fun_tc1 fun_args1 fun_tc2 fun_args2 mco
         eqs = map snd $ tryInteractInertFam ops fun_tc1
                             fun_args1 fake_rhs1 fun_args2 fake_rhs2
     in
-    unifyFunDeps ev Nominal $ \uenv ->
-    uPairsTcM uenv eqs
+    do { traceTcS "famfam" (vcat [ppr fun_tc1
+                                 , text "1side" <+> ppr fun_args1 <+> ppr fake_rhs1
+                                 , text "2side" <+> ppr fun_args2 <+> ppr fake_rhs2
+                                 , ppr eqs ])
+       ; unifyFunDeps ev Nominal $ \uenv ->
+         uPairsTcM uenv eqs }
 
   | otherwise  -- ordinary, non-injective type family
   = return False
@@ -3016,11 +3019,12 @@ improveTopFunEqs fam_tc args (EqCt { eq_ev = ev, eq_rhs = rhs_ty })
 improveGivenTopFunEqs :: TyCon -> [TcType] -> CtEvidence -> Xi -> TcS Bool
 improveGivenTopFunEqs fam_tc args ev rhs_ty
   | Just ops <- isBuiltInSynFamTyCon_maybe fam_tc
-  = do { emitNewGivens (ctEvLoc ev) $
+  = do { traceTcS "improveGivenTopFunEqs" (ppr fam_tc <+> ppr args $$ ppr ev $$ ppr rhs_ty)
+       ; emitNewGivens (ctEvLoc ev) $
            [ (Nominal, new_co)
            | (ax, _) <- tryInteractTopFam ops fam_tc args rhs_ty
            , let new_co = mkAxiomRuleCo ax [given_co] ]
-       ; return False }
+       ; return False }  -- False: no unifications
   | otherwise
   = return False    -- See Note [No Given/Given fundeps]
   where
@@ -3140,19 +3144,25 @@ improveGivenLocalFunEqs :: [EqCt]    -- Inert items, mixture of Given and Wanted
 --    e.g.    (x+y1~z, x+y2~z) => (y1 ~ y2)
 improveGivenLocalFunEqs funeqs_for_tc fam_tc work_args work_ev work_rhs
   | Just ops <- isBuiltInSynFamTyCon_maybe fam_tc
-  = foldlM (do_one ops) False funeqs_for_tc
+  = do { mapM_ (do_one ops) funeqs_for_tc
+       ; return False }     -- False: no unifications
   | otherwise
   = return False
   where
     given_co :: Coercion = ctEvCoercion work_ev
 
-    do_one :: BuiltInSynFamily -> Bool -> EqCt -> TcS Bool
-    do_one ops _ (EqCt { eq_ev = inert_ev
-                        , eq_lhs = TyFamLHS _ inert_args
-                        , eq_rhs = inert_rhs })
+    do_one :: BuiltInSynFamily -> EqCt -> TcS ()
+    do_one ops (EqCt { eq_ev = inert_ev
+                     , eq_lhs = TyFamLHS _ inert_args
+                     , eq_rhs = inert_rhs })
       | isGiven inert_ev
       , not (null pairs)
-      = do { emitNewGivens (ctEvLoc inert_ev) pairs; return True }
+      = do { traceTcS "improveGivenLocalFunEqs" (vcat[ ppr fam_tc <+> ppr work_args
+                                                     , text "work_ev" <+>  ppr work_ev
+                                                     , text "inert_ev" <+> ppr inert_ev
+                                                     , ppr work_rhs
+                                                     , ppr pairs ])
+           ; emitNewGivens (ctEvLoc inert_ev) pairs }
              -- This CtLoc for the new Givens doesn't reflect the
              -- fact that it's a combination of Givens, but I don't
              -- this that matters.
@@ -3160,9 +3170,9 @@ improveGivenLocalFunEqs funeqs_for_tc fam_tc work_args work_ev work_rhs
         pairs = [ (Nominal, new_co)
                 | (ax, _) <- tryInteractInertFam ops fam_tc
                                         work_args  work_rhs inert_args inert_rhs
-                , let new_co = mkAxiomRuleCo ax [given_co] ]
+                , let new_co = mkAxiomRuleCo ax [given_co, ctEvCoercion inert_ev] ]
 
-    do_one _ so_far _ = return so_far
+    do_one _  _ = return ()
 
 improveWantedLocalFunEqs
     :: [EqCt]     -- Inert items (Given and Wanted)
