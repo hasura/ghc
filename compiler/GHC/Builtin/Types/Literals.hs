@@ -840,7 +840,7 @@ matchFamNatToChar _ = Nothing
 axNatToCharTops :: [CoAxiomRule]
 axNatToCharTops
   = [ -- (NatToChar n ~ 'z') => (n ~ 122)
-      mkTopUnaryFamDeduction "CharToNatT1" typeCharToNatTyCon $ \n r ->
+      mkTopUnaryFamDeduction "CharToNatT1" typeNatToCharTyCon $ \n r ->
       do { c <- isCharLitTy r; return (Pair n (mkNumLitTy (charToInteger c))) } ]
 
 {-------------------------------------------------------------------------------
