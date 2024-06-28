@@ -1567,27 +1567,33 @@ downsweep :: HscEnv
                 -- (Modules, IsBoot) identifiers, unless the Bool is true in
                 -- which case there can be repeats
 downsweep hsc_env diag_wrapper old_summaries excl_mods allow_dup_roots = do
-  worker_limit <- liftIO $ mkWorkerLimit (hsc_dflags hsc_env)
-  downsweep_workers worker_limit hsc_env diag_wrapper old_summaries excl_mods
-    allow_dup_roots
+  n_jobs <- mkWorkerLimit (hsc_dflags hsc_env)
+  new <- rootSummariesParallel n_jobs hsc_env diag_wrapper summary
+  downsweep_imports hsc_env old_summary_map excl_mods allow_dup_roots new
+  where
+    summary = getRootSummary excl_mods old_summary_map
 
-downsweep_workers :: WorkerLimit
-                  -- ^ The number of workers we wish to run in parallel
-                  -> HscEnv
-                  -> (GhcMessage -> AnyGhcDiagnostic)
-                  -> [ModSummary]
+    -- A cache from file paths to the already summarised modules. The same file
+    -- can be used in multiple units so the map is also keyed by which unit the
+    -- file was used in.
+    -- Reuse these if we can because the most expensive part of downsweep is
+    -- reading the headers.
+    old_summary_map :: M.Map (UnitId, FilePath) ModSummary
+    old_summary_map =
+      M.fromList [((ms_unitid ms, msHsFilePath ms), ms) | ms <- old_summaries]
+
+downsweep_imports :: HscEnv
+                  -> M.Map (UnitId, FilePath) ModSummary
                   -> [ModuleName]
                   -> Bool
+                  -> ([(UnitId, DriverMessages)], [ModSummary])
                   -> IO ([DriverMessages], [ModuleGraphNode])
-downsweep_workers n_jobs hsc_env diag_wrapper old_summaries excl_mods allow_dup_roots
+downsweep_imports hsc_env old_summaries excl_mods allow_dup_roots (root_errs, rootSummariesOk)
    = do
-       (root_errs, rootSummariesOk) <-
-         rootSummariesParallel n_jobs hsc_env diag_wrapper
-         (getRootSummary excl_mods old_summary_map) roots
        let root_map = mkRootMap rootSummariesOk
        checkDuplicates root_map
        (deps, map0) <- loopSummaries rootSummariesOk (M.empty, root_map)
-       let closure_errs = checkHomeUnitsClosed (hsc_unit_env hsc_env)
+       let closure_errs = checkHomeUnitsClosed unit_env
            unit_env = hsc_unit_env hsc_env
            tmpfs    = hsc_tmpfs    hsc_env
 
@@ -1623,15 +1629,6 @@ downsweep_workers n_jobs hsc_env diag_wrapper old_summaries excl_mods allow_dup_
           [(ms_unitid ms, b, c) | (b, c) <- msDeps ms ]
 
         logger = hsc_logger hsc_env
-        roots  = hsc_targets hsc_env
-
-        -- A cache from file paths to the already summarised modules. The same file
-        -- can be used in multiple units so the map is also keyed by which unit the
-        -- file was used in.
-        -- Reuse these if we can because the most expensive part of downsweep is
-        -- reading the headers.
-        old_summary_map :: M.Map (UnitId, FilePath) ModSummary
-        old_summary_map = M.fromList [((ms_unitid ms, msHsFilePath ms), ms) | ms <- old_summaries]
 
         -- In a root module, the filename is allowed to diverge from the module
         -- name, so we have to check that there aren't multiple root files
@@ -1699,7 +1696,7 @@ downsweep_workers n_jobs hsc_env diag_wrapper old_summaries excl_mods allow_dup_
                 loopImports ss done summarised
           | otherwise
           = do
-               mb_s <- summariseModule hsc_env home_unit old_summary_map
+               mb_s <- summariseModule hsc_env home_unit old_summaries
                                        is_boot wanted_mod mb_pkg
                                        Nothing excl_mods
                case mb_s of
@@ -1779,9 +1776,8 @@ rootSummariesParallel ::
   HscEnv ->
   (GhcMessage -> AnyGhcDiagnostic) ->
   (HscEnv -> Target -> IO (Either (UnitId, DriverMessages) ModSummary)) ->
-  [Target] ->
   IO ([(UnitId, DriverMessages)], [ModSummary])
-rootSummariesParallel n_jobs hsc_env diag_wrapper get_summary targets = do
+rootSummariesParallel n_jobs hsc_env diag_wrapper get_summary = do
   n_cap <- getNumCapabilities
   let bundle_size = max 1 (length targets `div` (n_cap * 2))
       bundles = mk_bundles bundle_size targets
@@ -1789,6 +1785,8 @@ rootSummariesParallel n_jobs hsc_env diag_wrapper get_summary targets = do
   runPipelines n_jobs hsc_env diag_wrapper Nothing actions
   partitionEithers . concat . catMaybes <$!> sequence results
   where
+    targets = hsc_targets hsc_env
+
     mk_bundles sz = unfoldr \case
       [] -> Nothing
       ts -> Just (splitAt sz ts)
