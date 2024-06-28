@@ -30,9 +30,9 @@ module GHC.Core.Coercion.Axiom (
 
        Role(..), fsFromRole,
 
-       CoAxiomRule(..), TypeEqn,
-       BuiltInSynFamily(..), trivialBuiltInFamily,
-       sfMatchNone, sfInteractTopNone, sfInteractInertNone
+       CoAxiomRule(..), BuiltInFamRewrite(..), BuiltInFamInteract(..), TypeEqn,
+       coaxrName, coaxrAsmpRoles, coaxrRole, coaxrProves,
+       BuiltInSynFamily(..), trivialBuiltInFamily
        ) where
 
 import GHC.Prelude
@@ -566,17 +566,52 @@ as `CoAxiom` is the special case when there are no assumptions.
 -- | A more explicit representation for `t1 ~ t2`.
 type TypeEqn = Pair Type
 
--- | For now, we work only with nominal equality.
-data CoAxiomRule = CoAxiomRule
-  { coaxrName      :: FastString
-  , coaxrAsmpRoles :: [Role]    -- roles of parameter equations
-  , coaxrRole      :: Role      -- role of resulting equation
-  , coaxrProves    :: [TypeEqn] -> Maybe TypeEqn
-        -- ^ coaxrProves returns @Nothing@ when it doesn't like
-        -- the supplied arguments.  When this happens in a coercion
-        -- that means that the coercion is ill-formed, and Core Lint
-        -- checks for that.
-  }
+-- | CoAxiomRule is a sum type that joins BuiltInFamRewrite and BuiltInFamInteract
+data CoAxiomRule
+  = BuiltInFamRewrite  BuiltInFamRewrite
+  | BuiltInFamInteract BuiltInFamInteract
+
+coaxrName :: CoAxiomRule -> FastString
+coaxrName (BuiltInFamRewrite  bif) = bifrw_name bif
+coaxrName (BuiltInFamInteract bif) = bifint_name bif
+
+coaxrAsmpRoles :: CoAxiomRule -> [Role]
+coaxrAsmpRoles (BuiltInFamRewrite  bif) = bifrw_arg_roles  bif
+coaxrAsmpRoles (BuiltInFamInteract bif) = bifint_arg_roles bif
+
+coaxrRole :: CoAxiomRule -> Role
+coaxrRole (BuiltInFamRewrite  bif) = bifrw_res_role bif
+coaxrRole (BuiltInFamInteract bif) = bifint_res_role bif
+
+coaxrProves :: CoAxiomRule -> [TypeEqn] -> Maybe TypeEqn
+coaxrProves (BuiltInFamRewrite  bif) = bifrw_proves bif
+coaxrProves (BuiltInFamInteract bif) = bifint_proves bif
+
+data BuiltInFamInteract
+  = BIF_Interact
+      { bifint_name      :: FastString
+      , bifint_arg_roles :: [Role]    -- roles of parameter equations
+      , bifint_res_role  :: Role      -- role of resulting equation
+      , bifint_proves    :: [TypeEqn] -> Maybe TypeEqn
+            -- ^ coaxrProves returns @Nothing@ when it doesn't like
+            -- the supplied arguments.  When this happens in a coercion
+            -- that means that the coercion is ill-formed, and Core Lint
+            -- checks for that.
+      }
+
+data BuiltInFamRewrite
+  = BIF_Rewrite
+      { bifrw_name      :: FastString
+      , bifrw_arg_roles :: [Role]    -- roles of parameter equations
+      , bifrw_res_role  :: Role      -- role of resulting equation
+
+      , bifrw_match :: [Type] -> Maybe ([Type], Type)   -- Instantiating types and result type
+           -- coaxrMatch: does this reduce on the given arguments?
+           -- If it does, returns (CoAxiomRule, types to instantiate the rule at, rhs type)
+           -- That is: mkAxiomRuleCo coax (zipWith mkReflCo coaxrAsmpRoles ts)
+           --              :: F tys ~coaxrRole rhs,
+
+      , bifrw_proves :: [TypeEqn] -> Maybe TypeEqn }
 
 instance Data.Data CoAxiomRule where
   -- don't traverse?
@@ -598,24 +633,17 @@ instance Ord CoAxiomRule where
 instance Outputable CoAxiomRule where
   ppr = ppr . coaxrName
 
-
 -- Type checking of built-in families
 data BuiltInSynFamily = BuiltInSynFamily
-  { sfMatchFam      :: [Type] -> Maybe (CoAxiomRule, [Type], Type)
-    -- Does this reduce on the given arguments?
-    -- If it does, returns (CoAxiomRule, types to instantiate the rule at, rhs type)
-    -- That is: mkAxiomRuleCo coax (zipWith mkReflCo (coaxrAsmpRoles coax) ts)
-    --              :: F tys ~r rhs,
-    -- where the r in the output is coaxrRole of the rule. It is up to the
-    -- caller to ensure that this role is appropriate.
+  { sfMatchFam      :: [BuiltInFamRewrite]
 
-  , sfInteractTop   :: [CoAxiomRule]
+  , sfInteractTop   :: [BuiltInFamInteract]
     -- If given these type arguments and RHS, returns the equalities that
     -- are guaranteed to hold.  That is, if
     --     (ar, Pair s1 s2)  is an element ofo  (sfInteractTop tys ty)
     -- then  AxiomRule ar [co :: F tys ~ ty]  ::  s1~s2
 
-  , sfInteractInert :: [CoAxiomRule]
+  , sfInteractInert :: [BuiltInFamInteract]
     -- If given one set of arguments and result, and another set of arguments
     -- and result, returns the equalities that are guaranteed to hold.
   }
@@ -623,14 +651,8 @@ data BuiltInSynFamily = BuiltInSynFamily
 -- Provides default implementations that do nothing.
 trivialBuiltInFamily :: BuiltInSynFamily
 trivialBuiltInFamily = BuiltInSynFamily
-  { sfMatchFam      = sfMatchNone
+  { sfMatchFam      = []
   , sfInteractTop   = []
   , sfInteractInert = []
   }
 
-sfMatchNone :: a -> Maybe b
-sfMatchNone _ = Nothing
-
-sfInteractTopNone, sfInteractInertNone :: [CoAxiomRule]
-sfInteractTopNone   = []
-sfInteractInertNone = []

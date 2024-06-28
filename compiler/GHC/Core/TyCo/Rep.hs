@@ -919,7 +919,7 @@ data Coercion
 
   | AxiomRuleCo CoAxiomRule [Coercion]
     -- AxiomRuleCo is very like AxiomInstCo, but for a CoAxiomRule
-    -- The number coercions should match exactly the expectations
+    -- The number of coercions should match exactly the expectations
     -- of the CoAxiomRule (i.e., the rule is fully saturated).
 
   | UnivCo  -- See Note [UnivCo]
