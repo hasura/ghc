@@ -169,7 +169,7 @@ depanal :: GhcMonad m =>
         -> Bool          -- ^ allow duplicate roots
         -> m ModuleGraph
 depanal excluded_mods allow_dup_roots = do
-    (errs, mod_graph) <- depanalE excluded_mods allow_dup_roots
+    (errs, mod_graph) <- depanalE mkUnknownDiagnostic excluded_mods allow_dup_roots
     if isEmptyMessages errs
       then pure mod_graph
       else throwErrors (fmap GhcDriverMessage errs)
@@ -177,12 +177,13 @@ depanal excluded_mods allow_dup_roots = do
 -- | Perform dependency analysis like in 'depanal'.
 -- In case of errors, the errors and an empty module graph are returned.
 depanalE :: GhcMonad m =>     -- New for #17459
+            (GhcMessage -> AnyGhcDiagnostic) ->
             [ModuleName]      -- ^ excluded modules
             -> Bool           -- ^ allow duplicate roots
             -> m (DriverMessages, ModuleGraph)
-depanalE excluded_mods allow_dup_roots = do
+depanalE diag_wrapper excluded_mods allow_dup_roots = do
     hsc_env <- getSession
-    (errs, mod_graph) <- depanalPartial excluded_mods allow_dup_roots
+    (errs, mod_graph) <- depanalPartial diag_wrapper excluded_mods allow_dup_roots
     if isEmptyMessages errs
       then do
         hsc_env <- getSession
@@ -220,11 +221,12 @@ depanalE excluded_mods allow_dup_roots = do
 -- new module graph.
 depanalPartial
     :: GhcMonad m
-    => [ModuleName]  -- ^ excluded modules
+    => (GhcMessage -> AnyGhcDiagnostic)
+    -> [ModuleName]  -- ^ excluded modules
     -> Bool          -- ^ allow duplicate roots
     -> m (DriverMessages, ModuleGraph)
     -- ^ possibly empty 'Bag' of errors and a module graph.
-depanalPartial excluded_mods allow_dup_roots = do
+depanalPartial diag_wrapper excluded_mods allow_dup_roots = do
   hsc_env <- getSession
   let
          targets = hsc_targets hsc_env
@@ -243,7 +245,7 @@ depanalPartial excluded_mods allow_dup_roots = do
     liftIO $ flushFinderCaches (hsc_FC hsc_env) (hsc_unit_env hsc_env)
 
     (errs, graph_nodes) <- liftIO $ downsweep
-      hsc_env (mgModSummaries old_graph)
+      hsc_env diag_wrapper (mgModSummaries old_graph)
       excluded_mods allow_dup_roots
     let
       mod_graph = mkModuleGraph graph_nodes
@@ -495,7 +497,7 @@ loadWithCache :: GhcMonad m => Maybe ModIfaceCache -- ^ Instructions about how t
                             -> LoadHowMuch -- ^ How much `loadWithCache` should load
                             -> m SuccessFlag
 loadWithCache cache diag_wrapper how_much = do
-    (errs, mod_graph) <- depanalE [] False                        -- #17459
+    (errs, mod_graph) <- depanalE diag_wrapper [] False                        -- #17459
     msg <- mkBatchMsg <$> getSession
     success <- load' cache how_much diag_wrapper (Just msg) mod_graph
     if isEmptyMessages errs
@@ -1552,6 +1554,7 @@ type DownsweepCache = M.Map (UnitId, PkgQual, ModuleNameWithIsBoot) [Either Driv
 -- module, plus one for any hs-boot files.  The imports of these nodes
 -- are all there, including the imports of non-home-package modules.
 downsweep :: HscEnv
+          -> (GhcMessage -> AnyGhcDiagnostic)
           -> [ModSummary]
           -- ^ Old summaries
           -> [ModuleName]       -- Ignore dependencies on these; treat
@@ -1563,30 +1566,32 @@ downsweep :: HscEnv
                 -- The non-error elements of the returned list all have distinct
                 -- (Modules, IsBoot) identifiers, unless the Bool is true in
                 -- which case there can be repeats
-downsweep hsc_env old_summaries excl_mods allow_dup_roots = do
+downsweep hsc_env diag_wrapper old_summaries excl_mods allow_dup_roots = do
   worker_limit <- liftIO $ mkWorkerLimit (hsc_dflags hsc_env)
-  downsweep_workers worker_limit hsc_env old_summaries excl_mods allow_dup_roots
+  downsweep_workers worker_limit hsc_env diag_wrapper old_summaries excl_mods
+    allow_dup_roots
 
 downsweep_workers :: WorkerLimit
                   -- ^ The number of workers we wish to run in parallel
                   -> HscEnv
+                  -> (GhcMessage -> AnyGhcDiagnostic)
                   -> [ModSummary]
                   -> [ModuleName]
                   -> Bool
                   -> IO ([DriverMessages], [ModuleGraphNode])
-downsweep_workers n_jobs hsc_env old_summaries excl_mods allow_dup_roots
+downsweep_workers n_jobs hsc_env diag_wrapper old_summaries excl_mods allow_dup_roots
    = do
        (root_errs, rootSummariesOk) <-
-         rootSummariesParallel n_jobs hsc_env
+         rootSummariesParallel n_jobs hsc_env diag_wrapper
          (getRootSummary excl_mods old_summary_map) roots
        let root_map = mkRootMap rootSummariesOk
        checkDuplicates root_map
        (deps, map0) <- loopSummaries rootSummariesOk (M.empty, root_map)
        let closure_errs = checkHomeUnitsClosed (hsc_unit_env hsc_env)
-       let unit_env = hsc_unit_env hsc_env
-       let tmpfs    = hsc_tmpfs    hsc_env
+           unit_env = hsc_unit_env hsc_env
+           tmpfs    = hsc_tmpfs    hsc_env
 
-       let downsweep_errs = lefts $ concat $ M.elems map0
+           downsweep_errs = lefts $ concat $ M.elems map0
            downsweep_nodes = M.elems deps
 
            (other_errs, unit_nodes) = partitionEithers $ unitEnv_foldWithKey (\nodes uid hue -> nodes ++ unitModuleNodes downsweep_nodes uid hue) [] (hsc_HUG hsc_env)
@@ -1772,15 +1777,16 @@ getRootSummary excl_mods old_summary_map hsc_env target
 rootSummariesParallel ::
   WorkerLimit ->
   HscEnv ->
+  (GhcMessage -> AnyGhcDiagnostic) ->
   (HscEnv -> Target -> IO (Either (UnitId, DriverMessages) ModSummary)) ->
   [Target] ->
   IO ([(UnitId, DriverMessages)], [ModSummary])
-rootSummariesParallel n_jobs hsc_env get_summary targets = do
+rootSummariesParallel n_jobs hsc_env diag_wrapper get_summary targets = do
   n_cap <- getNumCapabilities
   let bundle_size = max 1 (length targets `div` (n_cap * 2))
       bundles = mk_bundles bundle_size targets
   (actions, results) <- unzip <$> mapM action_and_result (zip [1..] bundles)
-  runPipelines n_jobs hsc_env mkUnknownDiagnostic Nothing actions
+  runPipelines n_jobs hsc_env diag_wrapper Nothing actions
   partitionEithers . concat . catMaybes <$!> sequence results
   where
     mk_bundles sz = unfoldr \case
