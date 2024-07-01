@@ -302,10 +302,12 @@ mkInteractBinFamDeduction str fam_tc f
     , bifint_arg_roles = [Nominal, Nominal]
     , bifint_res_role  = Nominal
     , bifint_proves    = \cs -> do { [Pair lhs1 rhs1, Pair lhs2 rhs2] <- return cs
+--                                 ; same rhs1 rhs2
                                  ; (tc1, [x1,y1]) <- splitTyConApp_maybe lhs1
                                  ; (tc2, [x2,y2]) <- splitTyConApp_maybe lhs2
                                  ; massertPpr (tc1 == fam_tc) (ppr tc1 $$ ppr fam_tc)
                                  ; massertPpr (tc2 == fam_tc) (ppr tc2 $$ ppr fam_tc)
+--                                 ; f x1 y1 x2 y2 } }
                                  ; f x1 y1 rhs1 x2 y2 rhs2 } }
 
 
@@ -402,13 +404,13 @@ axAddInteracts :: [BuiltInFamInteract]
 axAddInteracts
   = map mk_ax $
     [ ("AddI-xr", \ x1 y1 z1 x2 y2 z2 -> injCheck x1 x2 z1 z2 y1 y2)
-                  -- (x1+y1~z, x2+y2~z) {x1=x2}=> (y1 ~ y2)
+                  -- (x1+y1~z1, x2+y2~z2) {x1=x2,z1=z2}=> (y1 ~ y2)
     , ("AddI-xr2", \ x1 y1 z1 x2 y2 z2 -> injCheck x2 y1 z1 z2 x1 y2)
-                  -- (x1+y1~z, x2+y2~z) {x2=y1}=> (x1 ~ y2)
+                  -- (x1+y1~z1, x2+y2~z2) {x2=y1,z1=z2}=> (x1 ~ y2)
     , ("AddI-yr", \ x1 y1 z1 x2 y2 z2 -> injCheck y1 y2 z1 z2 x1 x2)
-                  -- (x1+y1~z, x2+y2~z) {y1=y2}=> (x1 ~ x2)
+                  -- (x1+y1~z1, x2+y2~z2) {y1=y2,z1=z2}=> (x1 ~ x2)
     , ("AddI-yr2", \ x1 y1 z1 x2 y2 z2 -> injCheck x1 y2 z1 z2 y1 x2)
-                  -- (x1+y1~z, x2+y2~z) {x1=y2}=> (y1 ~ x2)
+                  -- (x1+y1~z1, x2+y2~z2) {x1=y2,z1=z2}=> (y1 ~ x2)
     ]
   where
     mk_ax (str, fun) = mkInteractBinFamDeduction str typeNatAddTyCon fun
