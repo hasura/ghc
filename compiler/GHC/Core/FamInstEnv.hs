@@ -49,25 +49,29 @@ import GHC.Core.Coercion.Axiom
 import GHC.Core.Reduction
 import GHC.Core.RoughMap
 import GHC.Core.FVs( orphNamesOfAxiomLHS )
+
+import GHC.Builtin.Types.Literals( tryMatchFam )
+
 import GHC.Types.Var.Set
 import GHC.Types.Var.Env
 import GHC.Types.Name
-import GHC.Data.FastString
-import GHC.Data.Maybe
 import GHC.Types.Var
 import GHC.Types.SrcLoc
-import Control.Monad
-import Data.List( mapAccumL )
-import Data.Array( Array, assocs )
+import GHC.Types.Name.Set
 
 import GHC.Utils.Misc
 import GHC.Utils.Outputable
 import GHC.Utils.Panic
 
-import GHC.Types.Name.Set
+import GHC.Data.FastString
+import GHC.Data.Maybe
 import GHC.Data.Bag
 import GHC.Data.List.Infinite (Infinite (..))
 import qualified GHC.Data.List.Infinite as Inf
+
+import Control.Monad
+import Data.List( mapAccumL )
+import Data.Array( Array, assocs )
 
 {-
 ************************************************************************
@@ -1192,8 +1196,8 @@ reduceTyFamApp_maybe envs role tc tys
   = let co = mkAxInstCo role ax ind inst_tys inst_cos
     in Just $ coercionRedn co
 
-  | Just ax           <- isBuiltInSynFamTyCon_maybe tc
-  , Just (coax,ts,ty) <- sfMatchFam ax tys
+  | Just builtin_fam  <- isBuiltInSynFamTyCon_maybe tc
+  , Just (coax,ts,ty) <- tryMatchFam builtin_fam tc tys
   , role == coaxrRole coax
   = let co = mkAxiomRuleCo coax (zipWith mkReflCo (coaxrAsmpRoles coax) ts)
     in Just $ mkReduction co ty

@@ -1,7 +1,7 @@
 {-# LANGUAGE LambdaCase #-}
 
 module GHC.Builtin.Types.Literals
-  ( tryInteractInertFam, tryInteractTopFam
+  ( tryInteractInertFam, tryInteractTopFam, tryMatchFam
 
   , typeNatTyCons
   , typeNatCoAxiomRules
@@ -70,6 +70,7 @@ import GHC.Utils.Outputable
 
 import Control.Monad ( guard )
 import Data.List  ( isPrefixOf, isSuffixOf )
+import Data.Maybe ( listToMaybe )
 import qualified Data.Char as Char
 
 {-
@@ -163,15 +164,25 @@ tryInteractInertFam :: BuiltInSynFamily -> TyCon
                     -> [Type] -> Type  -- F tys1 ~ ty1
                     -> [Type] -> Type  -- F tys2 ~ ty2
                     -> [(CoAxiomRule, TypeEqn)]
-tryInteractInertFam fam fam_tc tys1 ty1 tys2 ty2
+tryInteractInertFam builtin_fam fam_tc tys1 ty1 tys2 ty2
   = [(BuiltInFamInteract ax_rule, eqn)
-    | ax_rule  <- sfInteractInert fam
+    | ax_rule  <- sfInteractInert builtin_fam
     , Just eqn <- [bifint_proves ax_rule [eqn1,eqn2]] ]
   where
     eqn1 = Pair (mkTyConApp fam_tc tys1) ty1
     eqn2 = Pair (mkTyConApp fam_tc tys2) ty2
 
-
+tryMatchFam :: BuiltInSynFamily -> TyCon -> [Type]
+            -> Maybe (CoAxiomRule, [Type], Type)
+-- Does this reduce on the given arguments?
+-- If it does, returns (CoAxiomRule, types to instantiate the rule at, rhs type)
+-- That is: mkAxiomRuleCo coax (zipWith mkReflCo (coaxrAsmpRoles coax) ts)
+--              :: F tys ~r rhs,
+tryMatchFam builtin_fam fam_tc arg_tys
+  = listToMaybe $   -- Pick first rule to match
+    [ (BuiltInFamRewrite rw_ax, [inst_tys], res_ty)
+    | rw_ax <- sfMatchFam builtin_fam
+    , Just ([inst_tys],res_ty) <- [bifrw_match rw_ax arg_tys] ]
 
 -------------------------------------------------------------------------------
 --     Built-in type constructors for functions on type-level nats
