@@ -226,7 +226,7 @@ mkRewriteAxiom :: TyCon -> String
 mkRewriteAxiom tc str tpl_tvs lhs_tys rhs_ty
   = BIF_Rewrite
       { bifrw_name      = fsLit str
-      , bifrw_arg_roles = [Nominal, Nominal]
+      , bifrw_arg_roles = [Nominal | _ <- tpl_tvs]
       , bifrw_res_role  = Nominal
       , bifrw_match     = match_fn
       , bifrw_proves    = inst_fn }
@@ -240,7 +240,9 @@ mkRewriteAxiom tc str tpl_tvs lhs_tys rhs_ty
     inst_fn :: [TypeEqn] -> Maybe TypeEqn
     inst_fn inst_eqns
       = assertPpr (inst_eqns `equalLength` tpl_tvs) (text str $$ ppr inst_eqns) $
-        Just (mkTyConApp tc tys1 === substTy (zipTCvSubst tpl_tvs tys2) rhs_ty)
+        Just (mkTyConApp tc (substTys (zipTCvSubst tpl_tvs tys1) lhs_tys)
+              ===
+              substTy (zipTCvSubst tpl_tvs tys2) rhs_ty)
       where
         (tys1, tys2) = unzipPairs inst_eqns
 
