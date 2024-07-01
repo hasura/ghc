@@ -168,9 +168,9 @@ tryMatchFam :: BuiltInSynFamily -> [Type]
 --              :: F tys ~r rhs,
 tryMatchFam builtin_fam arg_tys
   = listToMaybe $   -- Pick first rule to match
-    [ (BuiltInFamRewrite rw_ax, [inst_tys], res_ty)
+    [ (BuiltInFamRewrite rw_ax, inst_tys, res_ty)
     | rw_ax <- sfMatchFam builtin_fam
-    , Just ([inst_tys],res_ty) <- [bifrw_match rw_ax arg_tys] ]
+    , Just (inst_tys,res_ty) <- [bifrw_match rw_ax arg_tys] ]
 
 -------------------------------------------------------------------------------
 --          Constructing BuiltInFamInteract, BuiltInFamRewrite
