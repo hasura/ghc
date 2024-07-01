@@ -573,7 +573,7 @@ axDivMatches
     , mkBinConstFoldAxiom tc "DivDef" isNumLitTy isNumLitTy $    -- 8 `div` 4 --> 2
       \x y -> do { guard (y /= 0); return (num (div x y)) } ]
   where
-    tc = typeNatModTyCon
+    tc = typeNatDivTyCon
 
 axModMatches :: [BuiltInFamRewrite]
 axModMatches
