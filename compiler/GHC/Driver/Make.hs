@@ -1774,6 +1774,9 @@ getRootSummary excl_mods old_summary_map hsc_env target
 -- The 'MakeAction' returns 'Maybe', which is not handled as an error, because
 -- 'runLoop' only sets it to 'Nothing' when an exception was thrown, so the
 -- result won't be read anyway here.
+--
+-- To emulate the current behavior, we funnel exceptions past the concurrency
+-- barrier and rethrow the first one afterwards.
 rootSummariesParallel ::
   WorkerLimit ->
   HscEnv ->
@@ -1785,9 +1788,11 @@ rootSummariesParallel n_jobs hsc_env diag_wrapper msg get_summary = do
   n_cap <- getNumCapabilities
   let bundle_size = max 1 (length targets `div` (max 1 (n_cap * 2)))
       bundles = mk_bundles bundle_size targets
-  (actions, results) <- unzip <$> mapM action_and_result (zip [1..] bundles)
+  (actions, get_results) <- unzip <$> mapM action_and_result (zip [1..] bundles)
   runPipelines n_jobs hsc_env diag_wrapper msg actions
-  partitionEithers . concat . catMaybes <$!> sequence results
+  (sequence . catMaybes <$> sequence get_results) >>= \case
+    Right results -> pure (partitionEithers (concat results))
+    Left exc -> throwIO exc
   where
     targets = hsc_targets hsc_env
 
@@ -1800,12 +1805,14 @@ rootSummariesParallel n_jobs hsc_env diag_wrapper msg get_summary = do
       pure $! (MakeAction (action log_queue_id ts) res_var, readMVar res_var)
 
     action log_queue_id target_bundle = do
-      env@MakeEnv {diag_wrapper, compile_sem} <- ask
-      lift $ MaybeT $
+      env@MakeEnv {compile_sem} <- ask
+      lift $ lift $
         withAbstractSem compile_sem $
         withLoggerHsc log_queue_id env \ lcl_hsc_env ->
-          wrapAction diag_wrapper lcl_hsc_env $
-          mapM (get_summary lcl_hsc_env) target_bundle
+          MC.try (mapM (get_summary lcl_hsc_env) target_bundle) >>= \case
+            Left e | Just (_ :: SomeAsyncException) <- fromException e ->
+              throwIO e
+            a -> pure a
 
 -- | This function checks then important property that if both p and q are home units
 -- then any dependency of p, which transitively depends on q is also a home unit.
