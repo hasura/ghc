@@ -169,7 +169,7 @@ depanal :: GhcMonad m =>
         -> Bool          -- ^ allow duplicate roots
         -> m ModuleGraph
 depanal excluded_mods allow_dup_roots = do
-    (errs, mod_graph) <- depanalE mkUnknownDiagnostic excluded_mods allow_dup_roots
+    (errs, mod_graph) <- depanalE mkUnknownDiagnostic Nothing excluded_mods allow_dup_roots
     if isEmptyMessages errs
       then pure mod_graph
       else throwErrors (fmap GhcDriverMessage errs)
@@ -177,13 +177,14 @@ depanal excluded_mods allow_dup_roots = do
 -- | Perform dependency analysis like in 'depanal'.
 -- In case of errors, the errors and an empty module graph are returned.
 depanalE :: GhcMonad m =>     -- New for #17459
-            (GhcMessage -> AnyGhcDiagnostic) ->
-            [ModuleName]      -- ^ excluded modules
+               (GhcMessage -> AnyGhcDiagnostic)
+            -> Maybe Messager
+            -> [ModuleName]      -- ^ excluded modules
             -> Bool           -- ^ allow duplicate roots
             -> m (DriverMessages, ModuleGraph)
-depanalE diag_wrapper excluded_mods allow_dup_roots = do
+depanalE diag_wrapper msg excluded_mods allow_dup_roots = do
     hsc_env <- getSession
-    (errs, mod_graph) <- depanalPartial diag_wrapper excluded_mods allow_dup_roots
+    (errs, mod_graph) <- depanalPartial diag_wrapper msg excluded_mods allow_dup_roots
     if isEmptyMessages errs
       then do
         hsc_env <- getSession
@@ -222,11 +223,12 @@ depanalE diag_wrapper excluded_mods allow_dup_roots = do
 depanalPartial
     :: GhcMonad m
     => (GhcMessage -> AnyGhcDiagnostic)
+    -> Maybe Messager
     -> [ModuleName]  -- ^ excluded modules
     -> Bool          -- ^ allow duplicate roots
     -> m (DriverMessages, ModuleGraph)
     -- ^ possibly empty 'Bag' of errors and a module graph.
-depanalPartial diag_wrapper excluded_mods allow_dup_roots = do
+depanalPartial diag_wrapper msg excluded_mods allow_dup_roots = do
   hsc_env <- getSession
   let
          targets = hsc_targets hsc_env
@@ -245,7 +247,7 @@ depanalPartial diag_wrapper excluded_mods allow_dup_roots = do
     liftIO $ flushFinderCaches (hsc_FC hsc_env) (hsc_unit_env hsc_env)
 
     (errs, graph_nodes) <- liftIO $ downsweep
-      hsc_env diag_wrapper (mgModSummaries old_graph)
+      hsc_env diag_wrapper msg (mgModSummaries old_graph)
       excluded_mods allow_dup_roots
     let
       mod_graph = mkModuleGraph graph_nodes
@@ -497,8 +499,8 @@ loadWithCache :: GhcMonad m => Maybe ModIfaceCache -- ^ Instructions about how t
                             -> LoadHowMuch -- ^ How much `loadWithCache` should load
                             -> m SuccessFlag
 loadWithCache cache diag_wrapper how_much = do
-    (errs, mod_graph) <- depanalE diag_wrapper [] False                        -- #17459
     msg <- mkBatchMsg <$> getSession
+    (errs, mod_graph) <- depanalE diag_wrapper (Just msg) [] False                        -- #17459
     success <- load' cache how_much diag_wrapper (Just msg) mod_graph
     if isEmptyMessages errs
       then pure success
@@ -506,7 +508,7 @@ loadWithCache cache diag_wrapper how_much = do
 
 -- Note [Unused packages]
 -- ~~~~~~~~~~~~~~~~~~~~~~
--- Cabal passes `--package-id` flag for each direct dependency. But GHC
+-- Cabal passes `-package-id` flag for each direct dependency. But GHC
 -- loads them lazily, so when compilation is done, we have a list of all
 -- actually loaded packages. All the packages, specified on command line,
 -- but never loaded, are probably unused dependencies.
@@ -1555,6 +1557,7 @@ type DownsweepCache = M.Map (UnitId, PkgQual, ModuleNameWithIsBoot) [Either Driv
 -- are all there, including the imports of non-home-package modules.
 downsweep :: HscEnv
           -> (GhcMessage -> AnyGhcDiagnostic)
+          -> Maybe Messager
           -> [ModSummary]
           -- ^ Old summaries
           -> [ModuleName]       -- Ignore dependencies on these; treat
@@ -1566,9 +1569,9 @@ downsweep :: HscEnv
                 -- The non-error elements of the returned list all have distinct
                 -- (Modules, IsBoot) identifiers, unless the Bool is true in
                 -- which case there can be repeats
-downsweep hsc_env diag_wrapper old_summaries excl_mods allow_dup_roots = do
+downsweep hsc_env diag_wrapper msg old_summaries excl_mods allow_dup_roots = do
   n_jobs <- mkWorkerLimit (hsc_dflags hsc_env)
-  new <- rootSummariesParallel n_jobs hsc_env diag_wrapper summary
+  new <- rootSummariesParallel n_jobs hsc_env diag_wrapper msg summary
   downsweep_imports hsc_env old_summary_map excl_mods allow_dup_roots new
   where
     summary = getRootSummary excl_mods old_summary_map
@@ -1775,14 +1778,15 @@ rootSummariesParallel ::
   WorkerLimit ->
   HscEnv ->
   (GhcMessage -> AnyGhcDiagnostic) ->
+  Maybe Messager ->
   (HscEnv -> Target -> IO (Either (UnitId, DriverMessages) ModSummary)) ->
   IO ([(UnitId, DriverMessages)], [ModSummary])
-rootSummariesParallel n_jobs hsc_env diag_wrapper get_summary = do
+rootSummariesParallel n_jobs hsc_env diag_wrapper msg get_summary = do
   n_cap <- getNumCapabilities
-  let bundle_size = max 1 (length targets `div` (n_cap * 2))
+  let bundle_size = max 1 (length targets `div` (max 1 (n_cap * 2)))
       bundles = mk_bundles bundle_size targets
   (actions, results) <- unzip <$> mapM action_and_result (zip [1..] bundles)
-  runPipelines n_jobs hsc_env diag_wrapper Nothing actions
+  runPipelines n_jobs hsc_env diag_wrapper msg actions
   partitionEithers . concat . catMaybes <$!> sequence results
   where
     targets = hsc_targets hsc_env
@@ -2522,12 +2526,12 @@ wrapAction msg_wrapper hsc_env k = do
   let lcl_logger = hsc_logger hsc_env
       lcl_dynflags = hsc_dflags hsc_env
       print_config = initPrintConfig lcl_dynflags
-  let logg err = printMessages lcl_logger print_config (initDiagOpts lcl_dynflags) (msg_wrapper <$> srcErrorMessages err)
+      logg err = printMessages lcl_logger print_config (initDiagOpts lcl_dynflags) (msg_wrapper <$> srcErrorMessages err)
   -- MP: It is a bit strange how prettyPrintGhcErrors handles some errors but then we handle
   -- SourceError and ThreadKilled differently directly below. TODO: Refactor to use `catches`
   -- directly. MP should probably use safeTry here to not catch async exceptions but that will regress performance due to
   -- internally using forkIO.
-  mres <- MC.try $ liftIO $ prettyPrintGhcErrors lcl_logger $ k
+  mres <- MC.try $ prettyPrintGhcErrors lcl_logger $ k
   case mres of
     Right res -> return $ Just res
     Left exc -> do

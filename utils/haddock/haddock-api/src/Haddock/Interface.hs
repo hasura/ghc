@@ -156,7 +156,7 @@ createIfaces
 createIfaces verbosity modules flags instIfaceMap = do
   targets <- mapM (\filePath -> guessTarget filePath Nothing Nothing) modules
   setTargets targets
-  (_errs, modGraph) <- depanalE mkUnknownDiagnostic [] False
+  (_errs, modGraph) <- depanalE mkUnknownDiagnostic (Just batchMsg) [] False
 
   liftIO $ traceMarkerIO "Load started"
   -- Create (if necessary) and load .hi-files.
