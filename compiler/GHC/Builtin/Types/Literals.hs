@@ -101,23 +101,12 @@ There are a few steps to adding a built-in type family:
 * Adding the type family TyCon itself
 
   This goes in GHC.Builtin.Types.Literals. There are plenty of examples of how to define
-  these—see, for instance, typeNatAddTyCon.
+  these -- see, for instance, typeNatAddTyCon.
 
   Once your TyCon has been defined, be sure to:
 
   - Export it from GHC.Builtin.Types.Literals. (Not doing so caused #14632.)
   - Include it in the typeNatTyCons list, defined in GHC.Builtin.Types.Literals.
-
-* Exposing associated type family axioms
-
-  When defining the type family TyCon, you will need to define an axiom for
-  the type family in general (see, for instance, axAddDef), and perhaps other
-  auxiliary axioms for special cases of the type family (see, for instance,
-  axAdd0L and axAdd0R).
-
-  After you have defined all of these axioms, be sure to include them in the
-  typeNatCoAxiomRules list, defined in GHC.Builtin.Types.Literals.
-  (Not doing so caused #14934.)
 
 * Define the type family somewhere
 

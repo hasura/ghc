@@ -553,14 +553,31 @@ instance Binary Role where
 *                                                                      *
 ************************************************************************
 
-Conditional axioms.  The general idea is that a `CoAxiomRule` looks like this:
+A CoAxiomRule is a built-in axiom for a built-in type family.
+CoAxiomRules come in two flavours:
 
-    forall as. (r1 ~ r2, s1 ~ s2) => t1 ~ t2
+* BuiltInFamRewrite: provides evidence for, say
+      (ax1)    3+4 ----> 7
+      (ax2)    s+0 ----> s
+  The evidence looks like
+      AxiomRuleCo ax1 [3,4] :: 3+4 ~ 7
+      AxiomRuleCo ax2 [s]   :: s+0 ~ s
+  The arguments in the AxiomRuleCo are the /instantiating types/, or
+  more generally cocerions, see Note [Coercion axioms applied to coercions]
+  in GHC.Core.TyCo.Rep).
 
-My intention is to reuse these for both (~) and (~#).
-The short-term plan is to use this datatype to represent the type-nat axioms.
-In the longer run, it may be good to unify this and `CoAxiom`,
-as `CoAxiom` is the special case when there are no assumptions.
+* BuiltInFamInteract: provides evidence for the consequences of one or two
+  other coercions.  For example
+      (ax3)   g1: a+b ~ 0               --->    a~0
+      (ax4)   g2: a+b ~ 0               --->    b~0
+      (ax5)   g3: a+b1~r1, g4 : a+b2~r  --->  b1~b2
+  The arguments to the AxiomRuleCo are the full coercions
+  (not types, right from the get-go).
+  So then:
+      AxiomRuleCo ax3 [g1]    :: a ~ 0
+      AxiomRuleCo ax2 [g2]    :: b ~ 0
+      AxiomRuleCo ax3 [g3,g4] :: b1 ~ b2
+
 -}
 
 -- | A more explicit representation for `t1 ~ t2`.
