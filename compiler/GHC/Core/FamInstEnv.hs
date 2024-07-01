@@ -1197,7 +1197,7 @@ reduceTyFamApp_maybe envs role tc tys
     in Just $ coercionRedn co
 
   | Just builtin_fam  <- isBuiltInSynFamTyCon_maybe tc
-  , Just (coax,ts,ty) <- tryMatchFam builtin_fam tc tys
+  , Just (coax,ts,ty) <- tryMatchFam builtin_fam tys
   , role == coaxrRole coax
   = let co = mkAxiomRuleCo coax (zipWith mkReflCo (coaxrAsmpRoles coax) ts)
     in Just $ mkReduction co ty
