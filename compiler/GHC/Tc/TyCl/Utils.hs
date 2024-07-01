@@ -39,7 +39,7 @@ import GHC.Builtin.Uniques ( mkBuiltinUnique )
 
 import GHC.Hs
 
-import GHC.Core.TyCo.Rep( Type(..), Coercion(..), MCoercion(..), UnivCoProvenance(..) )
+import GHC.Core.TyCo.Rep( Type(..), Coercion(..), MCoercion(..) )
 import GHC.Core.Multiplicity
 import GHC.Core.Predicate
 import GHC.Core.Make( rEC_SEL_ERROR_ID )
