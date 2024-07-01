@@ -1759,17 +1759,10 @@ getRootSummary excl_mods old_summary_map hsc_env target
 
 -- | Execute 'getRootSummary' for the 'Target's using the parallelism pipeline
 -- system.
--- Create bundles of 'MakeAction's for each 'Target' that uses 'withAbstractSem'
--- to wait for a free slot, limiting the number of concurrently computed
--- summaries to the value of the @-j@ option or the slots allocated by the job
--- server, if that is used.
---
--- The bundle size for @n@ targets on a machine with @c@ capabilites (threads)
--- is computed as @n / (2 c)@.
--- This is a best guess based on benchmarking some synthetic sets of modules
--- with @ghc -M@.
--- If you can come up with a more rigorously determined optimum, feel free to
--- change it!
+-- Create bundles of 'Target's wrapped in a 'MakeAction' that uses
+-- 'withAbstractSem' to wait for a free slot, limiting the number of
+-- concurrently computed summaries to the value of the @-j@ option or the slots
+-- allocated by the job server, if that is used.
 --
 -- The 'MakeAction' returns 'Maybe', which is not handled as an error, because
 -- 'runLoop' only sets it to 'Nothing' when an exception was thrown, so the
@@ -1785,20 +1778,21 @@ rootSummariesParallel ::
   (HscEnv -> Target -> IO (Either (UnitId, DriverMessages) ModSummary)) ->
   IO ([(UnitId, DriverMessages)], [ModSummary])
 rootSummariesParallel n_jobs hsc_env diag_wrapper msg get_summary = do
-  n_cap <- getNumCapabilities
-  let bundle_size = max 1 (length targets `div` (max 1 (n_cap * 2)))
-      bundles = mk_bundles bundle_size targets
   (actions, get_results) <- unzip <$> mapM action_and_result (zip [1..] bundles)
   runPipelines n_jobs hsc_env diag_wrapper msg actions
   (sequence . catMaybes <$> sequence get_results) >>= \case
     Right results -> pure (partitionEithers (concat results))
     Left exc -> throwIO exc
   where
-    targets = hsc_targets hsc_env
+    bundles = mk_bundles targets
 
-    mk_bundles sz = unfoldr \case
+    mk_bundles = unfoldr \case
       [] -> Nothing
-      ts -> Just (splitAt sz ts)
+      ts -> Just (splitAt bundle_size ts)
+
+    bundle_size = 20
+
+    targets = hsc_targets hsc_env
 
     action_and_result (log_queue_id, ts) = do
       res_var <- liftIO newEmptyMVar
