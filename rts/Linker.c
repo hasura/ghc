@@ -946,6 +946,7 @@ SymbolAddr* lookupSymbol( SymbolName* lbl )
                    "See top entry above.\n", lbl);
         IF_DEBUG(linker, printLoadedObjects());
         fflush(stderr);
+        r = 0xDEADBEEF;
     }
 
     if (!runPendingInitializers()) {

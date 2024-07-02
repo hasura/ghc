@@ -99,7 +99,8 @@ fillGot(ObjectCode * oc) {
                             } else {
                                 errorBelch("Failed to lookup symbol: %s\n",
                                            symbol->name);
-                                return EXIT_FAILURE;
+                                // return EXIT_FAILURE;
+                                symbol->addr = 0xDEADBEEF;
                             }
                         }
                     } else {
