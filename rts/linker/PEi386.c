@@ -1888,6 +1888,9 @@ ocGetNames_PEi386 ( ObjectCode* oc )
           sname[size-start]='\0';
           stgFree(tmp);
           sname = strdup (sname);
+          if(secNumber == IMAGE_SYM_UNDEFINED)
+            type |= SYM_TYPE_HIDDEN;
+
           if (!ghciInsertSymbolTable(oc->fileName, symhash, sname,
                                      addr, false, type, oc))
                return false;
@@ -1910,6 +1913,8 @@ ocGetNames_PEi386 ( ObjectCode* oc )
          if (isWeak) {
              setWeakSymbol(oc, sname);
          }
+         if(secNumber == IMAGE_SYM_UNDEFINED)
+           type |= SYM_TYPE_HIDDEN;
 
          if (! ghciInsertSymbolTable(oc->fileName, symhash, sname, addr,
                                      isWeak, type, oc))
@@ -1933,7 +1938,7 @@ static size_t
 makeSymbolExtra_PEi386( ObjectCode* oc, uint64_t index STG_UNUSED, size_t s, char* symbol STG_UNUSED, SymType type )
 {
     SymbolExtra *extra;
-    switch(type & ~SYM_TYPE_DUP_DISCARD) {
+    switch(type & ~(SYM_TYPE_DUP_DISCARD | SYM_TYPE_HIDDEN)) {
         case SYM_TYPE_CODE: {
             // jmp *-14(%rip)
             extra = m32_alloc(oc->rx_m32, sizeof(SymbolExtra), 8);
