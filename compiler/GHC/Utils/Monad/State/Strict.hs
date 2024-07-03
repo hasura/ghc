@@ -4,7 +4,7 @@
 -- | A state monad which is strict in its state.
 module GHC.Utils.Monad.State.Strict
   ( -- * The State monad
-    State(State)
+    State(State, State' {- for deriving via purposes only -})
   , state
   , evalState
   , execState
@@ -72,14 +72,17 @@ pattern State :: (s -> (# a, s #))
 pattern State m <- State' m
   where
     State m = State' (oneShot $ \s -> forceState (m s))
+{-# COMPLETE State #-}
 
 -- | Forces the state component of the unboxed representation pair of 'State'.
 -- See Note [Strict State monad]. This is The Place doing the forcing!
 forceState :: (# a, s #) -> (# a, s #)
 forceState (# a, !s #) = (# a, s #)
 
+-- See Note [The one-shot state monad trick] for why we don't derive this.
 instance Functor (State s) where
   fmap f m = State $ \s -> case runState' m s  of (# x, s' #) -> (# f x, s' #)
+  {-# INLINE fmap #-}
 
 instance Applicative (State s) where
   pure x  = State $ \s -> (# x, s #)
@@ -87,10 +90,20 @@ instance Applicative (State s) where
     case runState' m s  of { (# f, s' #) ->
     case runState' n s' of { (# x, s'' #) ->
                              (# f x, s'' #) }}
+  m *> n = State $ \s ->
+    case runState' m s of { (# _, s' #) ->
+    case runState' n s' of { (# x, s'' #) ->
+                             (# x, s'' #) }}
+  {-# INLINE pure #-}
+  {-# INLINE (<*>) #-}
+  {-# INLINE (*>) #-}
 
 instance Monad (State s) where
   m >>= n = State $ \s -> case runState' m s of
     (# r, !s' #) -> runState' (n r) s'
+  (>>) = (*>)
+  {-# INLINE (>>=) #-}
+  {-# INLINE (>>) #-}
 
 state :: (s -> (a, s)) -> State s a
 state f = State $ \s -> case f s of (r, s') -> (# r, s' #)
