@@ -3107,26 +3107,28 @@ improveGivenLocalFunEqs funeqs_for_tc fam_tc work_args work_ev work_rhs
       | isGiven inert_ev                    -- Given/Given interaction
       , TyFamLHS _ inert_args <- inert_lhs  -- Inert item is F inert_args ~ inert_rhs
       , work_rhs `tcEqType` inert_rhs       -- Both RHSs are the same
-      , not (null pairs)
-      = -- So we have work_ev  : F work_args  ~ rhs
+      , -- So we have work_ev  : F work_args  ~ rhs
         --            inert_ev : F inert_args ~ rhs
-        do { traceTcS "improveGivenLocalFunEqs" (vcat[ ppr fam_tc <+> ppr work_args
+        let pairs :: [(CoAxiomRule, TypeEqn)]
+            pairs = tryInteractInertFam ops fam_tc work_args inert_args
+      , not (null pairs)
+      = do { traceTcS "improveGivenLocalFunEqs" (vcat[ ppr fam_tc <+> ppr work_args
                                                      , text "work_ev" <+>  ppr work_ev
                                                      , text "inert_ev" <+> ppr inert_ev
                                                      , ppr work_rhs
                                                      , ppr pairs ])
-           ; emitNewGivens (ctEvLoc inert_ev) pairs }
+           ; emitNewGivens (ctEvLoc inert_ev) (map mk_ax_co pairs) }
              -- This CtLoc for the new Givens doesn't reflect the
              -- fact that it's a combination of Givens, but I don't
              -- this that matters.
       where
-        pairs = [ (Nominal, mkAxiomRuleCo ax [combined_co])
-                | (ax, _) <- tryInteractInertFam ops fam_tc work_args inert_args
-                , let -- given_co :: F work_args  ~ rhs
-                      -- inert_co :: F inert_args ~ rhs
-                      -- the_co :: F work_args ~ F inert_args
-                      inert_co    = ctEvCoercion inert_ev
-                      combined_co = given_co `mkTransCo` mkSymCo inert_co ]
+        inert_co = ctEvCoercion inert_ev
+        mk_ax_co (ax,_) = (Nominal, mkAxiomRuleCo ax [combined_co])
+          where
+            combined_co = given_co `mkTransCo` mkSymCo inert_co
+            -- given_co :: F work_args  ~ rhs
+            -- inert_co :: F inert_args ~ rhs
+            -- the_co :: F work_args ~ F inert_args
 
     do_one _  _ = return ()
 
