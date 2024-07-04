@@ -251,7 +251,7 @@ data CoAxBranch
        -- cab_tvs and cab_lhs may be eta-reduced; see
        -- Note [Eta reduction for data families]
     , cab_cvs      :: [CoVar]
-       -- ^ Bound coercion variables
+      -- ^ Bound coercion variables
        -- Always empty, for now.
        -- See Note [Constraints in patterns]
        -- in GHC.Tc.TyCl
@@ -654,22 +654,14 @@ instance Outputable CoAxiomRule where
 data BuiltInSynFamily = BuiltInSynFamily
   { sfMatchFam      :: [BuiltInFamRewrite]
 
-  , sfInteractTop   :: [BuiltInFamInteract]
+  , sfInteract:: [BuiltInFamInteract]
     -- If given these type arguments and RHS, returns the equalities that
     -- are guaranteed to hold.  That is, if
-    --     (ar, Pair s1 s2)  is an element ofo  (sfInteractTop tys ty)
+    --     (ar, Pair s1 s2)  is an element of  (sfInteract tys ty)
     -- then  AxiomRule ar [co :: F tys ~ ty]  ::  s1~s2
-
-  , sfInteractInert :: [BuiltInFamInteract]
-    -- If given one set of arguments and result, and another set of arguments
-    -- and result, returns the equalities that are guaranteed to hold.
   }
 
 -- Provides default implementations that do nothing.
 trivialBuiltInFamily :: BuiltInSynFamily
-trivialBuiltInFamily = BuiltInSynFamily
-  { sfMatchFam      = []
-  , sfInteractTop   = []
-  , sfInteractInert = []
-  }
+trivialBuiltInFamily = BuiltInSynFamily { sfMatchFam = [], sfInteract = [] }
 
