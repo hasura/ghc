@@ -820,6 +820,9 @@ data GeneralFlag
    -- Error message suppression
    | Opt_ShowErrorContext
 
+   -- Object code determinism
+   | Opt_ObjectDeterminism
+
    -- temporary flags
    | Opt_AutoLinkPackages
    | Opt_ImplicitImportQualified
@@ -930,6 +933,7 @@ codeGenFlags = EnumSet.fromList
    , Opt_ExposeAllUnfoldings
    , Opt_ExposeOverloadedUnfoldings
    , Opt_NoTypeableBinds
+   , Opt_ObjectDeterminism
    , Opt_Haddock
 
      -- Flags that affect catching of runtime errors
