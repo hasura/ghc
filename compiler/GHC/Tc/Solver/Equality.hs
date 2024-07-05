@@ -3017,10 +3017,11 @@ improve_injective_wanted_top fam_envs inj_args fam_tc lhs_tys rhs_ty
   where
     branches :: [CoAxBranch]
     branches | isOpenTypeFamilyTyCon fam_tc
-             , (fam_inst1 : _) <- lookupFamInstEnvByTyCon fam_envs fam_tc
-             = fromBranches (coAxiomBranches (fi_axiom fam_inst1))
+             , let fam_insts = lookupFamInstEnvByTyCon fam_envs fam_tc
+             = concatMap (fromBranches . coAxiomBranches . fi_axiom) fam_insts
              -- fam_inst1: It is possible to have several compatible equations in an open
              -- type family but we only want to derive equalities from one such equation.
+     -- ToDo: fix this comment
 
              | Just ax <- isClosedSynFamilyTyConWithAxiom_maybe fam_tc
              = fromBranches (coAxiomBranches ax)
