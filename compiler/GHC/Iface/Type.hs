@@ -2471,7 +2471,7 @@ instance Binary IfaceCoercion where
 instance Binary IfaceAxiomRule where
   put_ bh (IfaceAR_X n)   = putByte bh 0 >> put_ bh n
   put_ bh (IfaceAR_U n)   = putByte bh 1 >> put_ bh n
-  put_ bh (IfaceAR_B n i) = putByte bh 1 >> put_ bh n >> put_ bh i
+  put_ bh (IfaceAR_B n i) = putByte bh 2 >> put_ bh n >> put_ bh i
 
   get bh = do h <- getByte bh
               case h of
