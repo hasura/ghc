@@ -342,8 +342,8 @@ tidyCo env co
     go (FunCo r afl afr w co1 co2) = ((FunCo r afl afr $! go w) $! go co1) $! go co2
     go (CoVarCo cv)          = CoVarCo $! go_cv cv
     go (HoleCo h)            = HoleCo $! go_hole h
-    go (AxiomInstCo con ind cos) = AxiomInstCo con ind $! strictMap go cos
-    go co@(UnivCo { uco_lty = t1, uco_rty = t2 })
+    go (AxiomRuleCo ax cos)  = AxiomRuleCo ax $ strictMap go cos
+    go co@(UnivCo { uco_lty  = t1, uco_rty = t2 })
                              = co { uco_lty = tidyType env t1, uco_rty = tidyType env t2 }
                                -- Don't bother to tidy the uco_deps field
     go (SymCo co)            = SymCo $! go co
@@ -353,7 +353,6 @@ tidyCo env co
     go (InstCo co ty)        = (InstCo $! go co) $! go ty
     go (KindCo co)           = KindCo $! go co
     go (SubCo co)            = SubCo $! go co
-    go (AxiomRuleCo ax cos)  = AxiomRuleCo ax $ strictMap go cos
 
     go_cv cv = tidyTyCoVarOcc env cv
 

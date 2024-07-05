@@ -355,19 +355,19 @@ opt_co4 env sym rep r (CoVarCo cv)
 opt_co4 _ _ _ _ (HoleCo h)
   = pprPanic "opt_univ fell into a hole" (ppr h)
 
-opt_co4 env sym rep r (AxiomInstCo con ind cos)
+opt_co4 env sym rep r (AxiomRuleCo con cos)
     -- Do *not* push sym inside top-level axioms
     -- e.g. if g is a top-level axiom
     --   g a : f a ~ a
     -- then (sym (g ty)) /= g (sym ty) !!
-  = assert (r == coAxiomRole con )
-    wrapRole rep (coAxiomRole con) $
+  = assert (r == coAxiomRuleRole con )
+    wrapRole rep (coAxiomRuleRole con) $
     wrapSym sym $
                        -- some sub-cos might be P: use opt_co2
                        -- See Note [Optimising coercion optimisation]
-    AxiomInstCo con ind (zipWith (opt_co2 env False)
-                                 (coAxBranchRoles (coAxiomNthBranch con ind))
-                                 cos)
+    AxiomRuleCo con (zipWith (opt_co2 env False)
+                             (coAxiomRuleArgRoles con)
+                             cos)
       -- Note that the_co does *not* have sym pushed into it
 
 opt_co4 env sym rep r (UnivCo { uco_prov = prov, uco_lty = t1
@@ -505,13 +505,6 @@ opt_co4 env sym _rep r (KindCo co)
 opt_co4 env sym _ r (SubCo co)
   = assert (r == Representational) $
     opt_co4_wrap env sym True Nominal co
-
--- This could perhaps be optimized more.
-opt_co4 env sym rep r (AxiomRuleCo co cs)
-  = assert (r == coaxrRole co) $
-    wrapRole rep r $
-    wrapSym sym $
-    AxiomRuleCo co (zipWith (opt_co2 env False) (coaxrAsmpRoles co) cs)
 
 {- Note [Optimise CoVarCo to Refl]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -840,15 +833,13 @@ opt_trans_rule is co1 co2
   -- If we put TrPushSymAxR first, we'll get
   --    (axN ty ; sym (axN ty)) :: N ty ~ N ty -- Obviously Refl
   --    --> axN (sym (axN ty))  :: N ty ~ N ty -- Very stupid
-  | Just (sym1, ax1, ind1, cos1) <- isAxiom_maybe co1
-  , Just (sym2, ax2, ind2, cos2) <- isAxiom_maybe co2
-  , ax1 == ax2
-  , ind1 == ind2
+  | Just (sym1, axr1, cos1) <- isAxiomRuleCo_maybe co1
+  , Just (sym2, axr2, cos2) <- isAxiomRuleCo_maybe co2
+  , axr1 == axr2
   , sym1 == not sym2
-  , let branch = coAxiomNthBranch ax1 ind1
-        role   = coAxiomRole ax1
-        qtvs   = coAxBranchTyVars branch ++ coAxBranchCoVars branch
-        lhs    = coAxNthLHS ax1 ind1
+  , Just (tc, role, branch) <- coAxiomRuleBranch_maybe axr1
+  , let qtvs   = coAxBranchTyVars branch ++ coAxBranchCoVars branch
+        lhs    = mkTyConApp tc (coAxBranchLHS branch)
         rhs    = coAxBranchRHS branch
         pivot_tvs = exactTyCoVarsOfType (if sym2 then rhs else lhs)
   , all (`elemVarSet` pivot_tvs) qtvs
@@ -862,35 +853,31 @@ opt_trans_rule is co1 co2
   -- See Note [Push transitivity inside axioms] and
   -- Note [Push transitivity inside newtype axioms only]
   -- TrPushSymAxR
-  | Just (sym, con, ind, cos1) <- isAxiom_maybe co1
-  , isNewTyCon (coAxiomTyCon con)
+  | Just (sym, axr, cos1) <- isAxiomRuleCo_maybe co1
   , True <- sym
-  , Just cos2 <- matchAxiom sym con ind co2
-  , let newAxInst = AxiomInstCo con ind (opt_transList is (map mkSymCo cos2) cos1)
+  , Just cos2 <- matchNewtypeBranch sym axr co2
+  , let newAxInst = AxiomRuleCo axr (opt_transList is (map mkSymCo cos2) cos1)
   = fireTransRule "TrPushSymAxR" co1 co2 $ SymCo newAxInst
 
   -- TrPushAxR
-  | Just (sym, con, ind, cos1) <- isAxiom_maybe co1
-  , isNewTyCon (coAxiomTyCon con)
+  | Just (sym, axr, cos1) <- isAxiomRuleCo_maybe co1
   , False <- sym
-  , Just cos2 <- matchAxiom sym con ind co2
-  , let newAxInst = AxiomInstCo con ind (opt_transList is cos1 cos2)
+  , Just cos2 <- matchNewtypeBranch sym axr co2
+  , let newAxInst = AxiomRuleCo axr (opt_transList is cos1 cos2)
   = fireTransRule "TrPushAxR" co1 co2 newAxInst
 
   -- TrPushSymAxL
-  | Just (sym, con, ind, cos2) <- isAxiom_maybe co2
-  , isNewTyCon (coAxiomTyCon con)
+  | Just (sym, axr, cos2) <- isAxiomRuleCo_maybe co2
   , True <- sym
-  , Just cos1 <- matchAxiom (not sym) con ind co1
-  , let newAxInst = AxiomInstCo con ind (opt_transList is cos2 (map mkSymCo cos1))
+  , Just cos1 <- matchNewtypeBranch (not sym) axr co1
+  , let newAxInst = AxiomRuleCo axr (opt_transList is cos2 (map mkSymCo cos1))
   = fireTransRule "TrPushSymAxL" co1 co2 $ SymCo newAxInst
 
   -- TrPushAxL
-  | Just (sym, con, ind, cos2) <- isAxiom_maybe co2
-  , isNewTyCon (coAxiomTyCon con)
+  | Just (sym, axr, cos2) <- isAxiomRuleCo_maybe co2
   , False <- sym
-  , Just cos1 <- matchAxiom (not sym) con ind co1
-  , let newAxInst = AxiomInstCo con ind (opt_transList is cos1 cos2)
+  , Just cos1 <- matchNewtypeBranch (not sym) axr co1
+  , let newAxInst = AxiomRuleCo axr (opt_transList is cos1 cos2)
   = fireTransRule "TrPushAxL" co1 co2 newAxInst
 
 
@@ -1145,24 +1132,24 @@ chooseRole True _ = Representational
 chooseRole _    r = r
 
 -----------
-isAxiom_maybe :: Coercion -> Maybe (Bool, CoAxiom Branched, Int, [Coercion])
+isAxiomRuleCo_maybe :: Coercion -> Maybe (SymFlag, CoAxiomRule, [Coercion])
 -- We don't expect to see nested SymCo; and that lets us write a simple,
 -- non-recursive function. (If we see a nested SymCo we'll just fail,
 -- which is ok.)
-isAxiom_maybe (SymCo (AxiomInstCo ax ind cos))
-  = Just (True, ax, ind, cos)
-isAxiom_maybe (AxiomInstCo ax ind cos)
-  = Just (False, ax, ind, cos)
-isAxiom_maybe _ = Nothing
+isAxiomRuleCo_maybe (SymCo (AxiomRuleCo ax cos)) = Just (True, ax, cos)
+isAxiomRuleCo_maybe (AxiomRuleCo ax cos)         = Just (False, ax, cos)
+isAxiomRuleCo_maybe _                            = Nothing
 
-matchAxiom :: Bool -- True = match LHS, False = match RHS
-           -> CoAxiom br -> Int -> Coercion -> Maybe [Coercion]
-matchAxiom sym ax@(CoAxiom { co_ax_tc = tc }) ind co
-  | CoAxBranch { cab_tvs = qtvs
+matchNewtypeBranch :: Bool -- True = match LHS, False = match RHS
+                   -> CoAxiomRule
+                   -> Coercion -> Maybe [Coercion]
+matchNewtypeBranch sym axr co
+  | Just (tc,branch) <- isNewtypeAxiomRule_maybe axr
+  , CoAxBranch { cab_tvs = qtvs
                , cab_cvs = []   -- can't infer these, so fail if there are any
                , cab_roles = roles
                , cab_lhs = lhs
-               , cab_rhs = rhs } <- coAxiomNthBranch ax ind
+               , cab_rhs = rhs } <- branch
   , Just subst <- liftCoMatch (mkVarSet qtvs)
                               (if sym then (mkTyConApp tc lhs) else rhs)
                               co

@@ -14,7 +14,7 @@ module GHC.Iface.Type (
         IfLclName(..), mkIfLclName, ifLclNameFS,
 
         IfaceType(..), IfacePredType, IfaceKind, IfaceCoercion(..),
-        IfaceMCoercion(..),
+        IfaceAxiomRule(..),IfaceMCoercion(..),
         IfaceMult,
         IfaceTyCon(..),
         IfaceTyConInfo(..), mkIfaceTyConInfo,
@@ -476,8 +476,7 @@ data IfaceCoercion
   | IfaceAppCo        IfaceCoercion IfaceCoercion
   | IfaceForAllCo     IfaceBndr !ForAllTyFlag !ForAllTyFlag IfaceCoercion IfaceCoercion
   | IfaceCoVarCo      IfLclName
-  | IfaceAxiomInstCo  IfExtName BranchIndex [IfaceCoercion]
-  | IfaceAxiomRuleCo  IfLclName [IfaceCoercion]
+  | IfaceAxiomRuleCo  IfaceAxiomRule [IfaceCoercion]
        -- ^ There are only a fixed number of CoAxiomRules, so it suffices
        -- to use an IfaceLclName to distinguish them.
        -- See Note [Adding built-in type families] in GHC.Builtin.Types.Literals
@@ -493,6 +492,12 @@ data IfaceCoercion
   | IfaceHoleCo       CoVar    -- ^ See Note [Holes in IfaceCoercion]
   deriving (Eq, Ord)
   -- Why Ord?  See Note [Ord instance of IfaceType]
+
+data IfaceAxiomRule
+  = IfaceAR_X IfLclName               -- Built-in
+  | IfaceAR_B IfExtName BranchIndex   -- Branched
+  | IfaceAR_U IfExtName               -- Unbranched
+  deriving (Eq, Ord)
 
 {- Note [Holes in IfaceCoercion]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -698,7 +703,6 @@ substIfaceType env ty
     go_co (IfaceFreeCoVar cv)        = IfaceFreeCoVar cv
     go_co (IfaceCoVarCo cv)          = IfaceCoVarCo cv
     go_co (IfaceHoleCo cv)           = IfaceHoleCo cv
-    go_co (IfaceAxiomInstCo a i cos) = IfaceAxiomInstCo a i (go_cos cos)
     go_co (IfaceUnivCo p r t1 t2 ds) = IfaceUnivCo p r (go t1) (go t2) (go_cos ds)
     go_co (IfaceSymCo co)            = IfaceSymCo (go_co co)
     go_co (IfaceTransCo co1 co2)     = IfaceTransCo (go_co co1) (go_co co2)
@@ -2009,11 +2013,8 @@ ppr_co ctxt_prec (IfaceInstCo co ty)
     text "Inst" <+> sep [ pprParendIfaceCoercion co
                         , pprParendIfaceCoercion ty ]
 
-ppr_co ctxt_prec (IfaceAxiomRuleCo tc cos)
-  = maybeParen ctxt_prec appPrec $ ppr tc <+> parens (interpp'SP cos)
-
-ppr_co ctxt_prec (IfaceAxiomInstCo n i cos)
-  = ppr_special_co ctxt_prec (ppr n <> brackets (ppr i)) cos
+ppr_co ctxt_prec (IfaceAxiomRuleCo ax cos)
+  = ppr_special_co ctxt_prec (pprIfAxRule ax) cos
 ppr_co ctxt_prec (IfaceSymCo co)
   = ppr_special_co ctxt_prec (text "Sym") [co]
 ppr_co ctxt_prec (IfaceTransCo co1 co2)
@@ -2035,6 +2036,11 @@ ppr_special_co :: PprPrec -> SDoc -> [IfaceCoercion] -> SDoc
 ppr_special_co ctxt_prec doc cos
   = maybeParen ctxt_prec appPrec
                (sep [doc, nest 4 (sep (map pprParendIfaceCoercion cos))])
+
+pprIfAxRule :: IfaceAxiomRule -> SDoc
+pprIfAxRule (IfaceAR_X n)   = ppr n
+pprIfAxRule (IfaceAR_U n)   = ppr n
+pprIfAxRule (IfaceAR_B n i) = ppr n <> brackets (int i)
 
 ppr_role :: Role -> SDoc
 ppr_role r = underscore <> pp_role
@@ -2361,11 +2367,6 @@ instance Binary IfaceCoercion where
   put_ bh (IfaceCoVarCo a) = do
           putByte bh 7
           put_ bh a
-  put_ bh (IfaceAxiomInstCo a b c) = do
-          putByte bh 8
-          put_ bh a
-          put_ bh b
-          put_ bh c
   put_ bh (IfaceUnivCo a b c d deps) = do
           putByte bh 9
           put_ bh a
@@ -2438,10 +2439,6 @@ instance Binary IfaceCoercion where
                    return $ IfaceForAllCo a visL visR b c
            7 -> do a <- get bh
                    return $ IfaceCoVarCo a
-           8 -> do a <- get bh
-                   b <- get bh
-                   c <- get bh
-                   return $ IfaceAxiomInstCo a b c
            9 -> do a <- get bh
                    b <- get bh
                    c <- get bh
@@ -2470,6 +2467,17 @@ instance Binary IfaceCoercion where
                    b <- get bh
                    return $ IfaceAxiomRuleCo a b
            _ -> panic ("get IfaceCoercion " ++ show tag)
+
+instance Binary IfaceAxiomRule where
+  put_ bh (IfaceAR_X n)   = putByte bh 0 >> put_ bh n
+  put_ bh (IfaceAR_U n)   = putByte bh 1 >> put_ bh n
+  put_ bh (IfaceAR_B n i) = putByte bh 1 >> put_ bh n >> put_ bh i
+
+  get bh = do h <- getByte bh
+              case h of
+                0 -> do { n <- get bh; return (IfaceAR_X n) }
+                1 -> do { n <- get bh; return (IfaceAR_U n) }
+                _ -> do { n <- get bh; i <- get bh; return (IfaceAR_B n i) }
 
 instance Binary (DefMethSpec IfaceType) where
     put_ bh VanillaDM     = putByte bh 0
@@ -2508,7 +2516,6 @@ instance NFData IfaceCoercion where
     IfaceAppCo f1 f2 -> rnf f1 `seq` rnf f2
     IfaceForAllCo f1 f2 f3 f4 f5 -> rnf f1 `seq` rnf f2 `seq` rnf f3 `seq` rnf f4 `seq` rnf f5
     IfaceCoVarCo f1 -> rnf f1
-    IfaceAxiomInstCo f1 f2 f3 -> rnf f1 `seq` rnf f2 `seq` rnf f3
     IfaceAxiomRuleCo f1 f2 -> rnf f1 `seq` rnf f2
     IfaceUnivCo f1 f2 f3 f4 deps -> rnf f1 `seq` f2 `seq` rnf f3 `seq` rnf f4 `seq` rnf deps
     IfaceSymCo f1 -> rnf f1
@@ -2520,6 +2527,12 @@ instance NFData IfaceCoercion where
     IfaceSubCo f1 -> rnf f1
     IfaceFreeCoVar f1 -> f1 `seq` ()
     IfaceHoleCo f1 -> f1 `seq` ()
+
+instance NFData IfaceAxiomRule where
+  rnf = \case
+    IfaceAR_X n   -> rnf n
+    IfaceAR_U n   -> rnf n
+    IfaceAR_B n i -> rnf n `seq` rnf i
 
 instance NFData IfaceMCoercion where
   rnf x = seq x ()

@@ -1563,7 +1563,6 @@ collect_cand_qtvs_co orig_ty cur_lvl bound = go_co
     go_co dv (TyConAppCo _ _ cos)    = foldlM go_co dv cos
     go_co dv (AppCo co1 co2)         = foldlM go_co dv [co1, co2]
     go_co dv (FunCo _ _ _ w co1 co2) = foldlM go_co dv [w, co1, co2]
-    go_co dv (AxiomInstCo _ _ cos)   = foldlM go_co dv cos
     go_co dv (AxiomRuleCo _ cos)     = foldlM go_co dv cos
     go_co dv (UnivCo { uco_lty = t1, uco_rty = t2, uco_deps = deps })
                                      = do { dv1 <- collect_cand_qtvs orig_ty True cur_lvl bound dv t1

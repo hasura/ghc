@@ -1193,13 +1193,14 @@ reduceTyFamApp_maybe envs role tc tys
 
   | Just ax <- isClosedSynFamilyTyConWithAxiom_maybe tc
   , Just (ind, inst_tys, inst_cos) <- chooseBranch ax tys
-  = let co = mkAxInstCo role ax ind inst_tys inst_cos
+  = let co = mkAxInstCo role (BranchedAxiom ax ind) inst_tys inst_cos
     in Just $ coercionRedn co
 
   | Just builtin_fam  <- isBuiltInSynFamTyCon_maybe tc
-  , Just (coax,ts,ty) <- tryMatchFam builtin_fam tys
-  , role == coaxrRole coax
-  = let co = mkAxiomRuleCo coax (zipWith mkReflCo (coaxrAsmpRoles coax) ts)
+  , Just (rewrite,ts,ty) <- tryMatchFam builtin_fam tys
+  , role == bifrw_res_role rewrite
+  = let co = mkAxiomRuleCo (BuiltInFamRewrite rewrite)
+                           (zipWith mkReflCo (bifrw_arg_roles rewrite) ts)
     in Just $ mkReduction co ty
 
   | otherwise

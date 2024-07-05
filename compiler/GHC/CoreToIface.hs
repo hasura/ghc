@@ -296,8 +296,7 @@ toIfaceCoercionX fr co
     go (InstCo co arg)      = IfaceInstCo (go co) (go arg)
     go (KindCo c)           = IfaceKindCo (go c)
     go (SubCo co)           = IfaceSubCo (go co)
-    go (AxiomRuleCo co cs)  = IfaceAxiomRuleCo (mkIfLclName (coaxrName co)) (map go cs)
-    go (AxiomInstCo c i cs) = IfaceAxiomInstCo (coAxiomName c) i (map go cs)
+    go (AxiomRuleCo co cs)  = IfaceAxiomRuleCo (toIfaceAxiomRule co) (map go cs)
     go (UnivCo { uco_prov = p, uco_role = r, uco_lty = t1, uco_rty = t2, uco_deps = deps })
         = IfaceUnivCo p r (toIfaceTypeX fr t1) (toIfaceTypeX fr t2) (map go deps)
 
@@ -316,6 +315,12 @@ toIfaceCoercionX fr co
                       (toIfaceCoercionX fr' co)
                           where
                             fr' = fr `delVarSet` tv
+
+toIfaceAxiomRule :: CoAxiomRule -> IfaceAxiomRule
+toIfaceAxiomRule (BuiltInFamRewrite  bif) = IfaceAR_X (mkIfLclName (bifrw_name bif))
+toIfaceAxiomRule (BuiltInFamInteract bif) = IfaceAR_X (mkIfLclName (bifint_name bif))
+toIfaceAxiomRule (BranchedAxiom ax i)     = IfaceAR_B (coAxiomName ax) i
+toIfaceAxiomRule (UnbranchedAxiom ax)     = IfaceAR_U (coAxiomName ax)
 
 toIfaceTcArgs :: TyCon -> [Type] -> IfaceAppArgs
 toIfaceTcArgs = toIfaceTcArgsX emptyVarSet

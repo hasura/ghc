@@ -907,20 +907,13 @@ data Coercion
   | CoVarCo CoVar      -- :: _ -> (N or R)
                        -- result role depends on the tycon of the variable's type
 
-    -- AxiomInstCo :: e -> _ -> ?? -> e
-  | AxiomInstCo (CoAxiom Branched) BranchIndex [Coercion]
-     -- See also [CoAxiom index]
+  | AxiomRuleCo CoAxiomRule [Coercion]
      -- The coercion arguments always *precisely* saturate
      -- arity of (that branch of) the CoAxiom. If there are
      -- any left over, we use AppCo.
      -- See [Coercion axioms applied to coercions]
      -- The roles of the argument coercions are determined
      -- by the cab_roles field of the relevant branch of the CoAxiom
-
-  | AxiomRuleCo CoAxiomRule [Coercion]
-    -- AxiomRuleCo is very like AxiomInstCo, but for a CoAxiomRule
-    -- The number of coercions should match exactly the expectations
-    -- of the CoAxiomRule (i.e., the rule is fully saturated).
 
   | UnivCo  -- See Note [UnivCo]
             -- Of kind (lty ~role rty)
@@ -1197,19 +1190,6 @@ Now we have
   sym (C b) ; C g
 
 which can be optimized to F g.
-
-Note [CoAxiom index]
-~~~~~~~~~~~~~~~~~~~~
-A CoAxiom has 1 or more branches. Each branch has contains a list
-of the free type variables in that branch, the LHS type patterns,
-and the RHS type for that branch. When we apply an axiom to a list
-of coercions, we must choose which branch of the axiom we wish to
-use, as the different branches may have different numbers of free
-type variables. (The number of type patterns is always the same
-among branches, but that doesn't quite concern us here.)
-
-The Int in the AxiomInstCo constructor is the 0-indexed number
-of the chosen branch.
 
 Note [Required foralls in Core]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1981,14 +1961,13 @@ foldTyCo (TyCoFolder { tcf_view       = view
     go_co env (TyConAppCo _ _ args)    = go_cos env args
     go_co env (AppCo c1 c2)            = go_co env c1 `mappend` go_co env c2
     go_co env (CoVarCo cv)             = covar env cv
-    go_co env (AxiomInstCo _ _ args)   = go_cos env args
+    go_co env (AxiomRuleCo _ cos)      = go_cos env cos
     go_co env (HoleCo hole)            = cohole env hole
     go_co env (UnivCo { uco_lty = t1, uco_rty = t2, uco_deps = deps })
                                        = go_ty env t1 `mappend` go_ty env t2
                                          `mappend` go_cos env deps
     go_co env (SymCo co)               = go_co env co
     go_co env (TransCo c1 c2)          = go_co env c1 `mappend` go_co env c2
-    go_co env (AxiomRuleCo _ cos)      = go_cos env cos
     go_co env (SelCo _ co)             = go_co env co
     go_co env (LRCo _ co)              = go_co env co
     go_co env (InstCo co arg)          = go_co env co `mappend` go_co env arg
@@ -2054,7 +2033,7 @@ coercionSize (FunCo _ _ _ w c1 c2) = 1 + coercionSize c1 + coercionSize c2
                                                          + coercionSize w
 coercionSize (CoVarCo _)         = 1
 coercionSize (HoleCo _)          = 1
-coercionSize (AxiomInstCo _ _ args) = 1 + sum (map coercionSize args)
+coercionSize (AxiomRuleCo _ cs)     = 1 + sum (map coercionSize cs)
 coercionSize (UnivCo { uco_lty = t1, uco_rty = t2 })  = 1 + typeSize t1 + typeSize t2
 coercionSize (SymCo co)          = 1 + coercionSize co
 coercionSize (TransCo co1 co2)   = 1 + coercionSize co1 + coercionSize co2
@@ -2063,7 +2042,6 @@ coercionSize (LRCo  _ co)        = 1 + coercionSize co
 coercionSize (InstCo co arg)     = 1 + coercionSize co + coercionSize arg
 coercionSize (KindCo co)         = 1 + coercionSize co
 coercionSize (SubCo co)          = 1 + coercionSize co
-coercionSize (AxiomRuleCo _ cs)  = 1 + sum (map coercionSize cs)
 
 {-
 ************************************************************************

@@ -44,7 +44,7 @@ module GHC.Core.Coercion (
         mkNakedForAllCo, mkForAllCo, mkHomoForAllCos,
         mkPhantomCo,
         mkHoleCo, mkUnivCo, mkSubCo,
-        mkAxiomInstCo, mkProofIrrelCo,
+        mkProofIrrelCo,
         downgradeRole, mkAxiomRuleCo,
         mkGReflRightCo, mkGReflLeftCo, mkCoherenceLeftCo, mkCoherenceRightCo,
         mkKindCo,
@@ -1022,41 +1022,39 @@ it's a relatively expensive test and perhaps better done in
 optCoercion.  Not a big deal either way.
 -}
 
-mkAxInstCo :: Role -> CoAxiom br -> BranchIndex -> [Type] -> [Coercion]
+mkAxInstCo :: Role
+           -> CoAxiomRule   -- Always BranchedAxiom or UnbranchedAxiom
+           -> [Type] -> [Coercion]
            -> Coercion
 -- mkAxInstCo can legitimately be called over-saturated;
 -- i.e. with more type arguments than the coercion requires
-mkAxInstCo role ax index tys cos
+-- Only called with BranchedAxiom or UnbranchedAxiom
+mkAxInstCo role axr tys cos
   | arity == n_tys = downgradeRole role ax_role $
-                     mkAxiomInstCo ax_br index (rtys `chkAppend` cos)
+                     AxiomRuleCo axr (rtys `chkAppend` cos)
   | otherwise      = assert (arity < n_tys) $
                      downgradeRole role ax_role $
-                     mkAppCos (mkAxiomInstCo ax_br index
-                                             (ax_args `chkAppend` cos))
+                     mkAppCos (AxiomRuleCo axr (ax_args `chkAppend` cos))
                               leftover_args
   where
-    n_tys         = length tys
-    ax_br         = toBranchedAxiom ax
-    branch        = coAxiomNthBranch ax_br index
-    tvs           = coAxBranchTyVars branch
-    arity         = length tvs
-    arg_roles     = coAxBranchRoles branch
-    rtys          = zipWith mkReflCo (arg_roles ++ repeat Nominal) tys
-    (ax_args, leftover_args)
-                  = splitAt arity rtys
-    ax_role       = coAxiomRole ax
+    (ax_role, branch)        = case coAxiomRuleBranch_maybe axr of
+                                  Just (_tc, ax_role, branch) -> (ax_role, branch)
+                                  Nothing -> pprPanic "mkAxInstCo" (ppr axr)
+    n_tys                    = length tys
+    arity                    = length (coAxBranchTyVars branch)
+    arg_roles                = coAxBranchRoles branch
+    rtys                     = zipWith mkReflCo (arg_roles ++ repeat Nominal) tys
+    (ax_args, leftover_args) = splitAt arity rtys
 
 -- worker function
-mkAxiomInstCo :: CoAxiom Branched -> BranchIndex -> [Coercion] -> Coercion
-mkAxiomInstCo ax index args
-  = assert (args `lengthIs` coAxiomArity ax index) $
-    AxiomInstCo ax index args
+mkAxiomRuleCo :: CoAxiomRule -> [Coercion] -> Coercion
+mkAxiomRuleCo = AxiomRuleCo
 
 -- to be used only with unbranched axioms
 mkUnbranchedAxInstCo :: Role -> CoAxiom Unbranched
                      -> [Type] -> [Coercion] -> Coercion
 mkUnbranchedAxInstCo role ax tys cos
-  = mkAxInstCo role ax 0 tys cos
+  = mkAxInstCo role (UnbranchedAxiom ax) tys cos
 
 mkAxInstRHS :: CoAxiom br -> BranchIndex -> [Type] -> [Coercion] -> Type
 -- Instantiate the axiom with specified types,
@@ -1386,9 +1384,6 @@ downgradeRole r1 r2 co
       Just co' -> co'
       Nothing  -> pprPanic "downgradeRole" (ppr co)
 
-mkAxiomRuleCo :: CoAxiomRule -> [Coercion] -> Coercion
-mkAxiomRuleCo = AxiomRuleCo
-
 -- | Make a "coercion between coercions".
 mkProofIrrelCo :: Role       -- ^ role of the created coercion, "r"
                -> CoercionN  -- ^ :: phi1 ~N phi2
@@ -1580,7 +1575,6 @@ promoteCoercion co = case co of
 
     CoVarCo {}     -> mkKindCo co
     HoleCo {}      -> mkKindCo co
-    AxiomInstCo {} -> mkKindCo co
     AxiomRuleCo {} -> mkKindCo co
     UnivCo {}      -> mkKindCo co
 
@@ -2402,7 +2396,6 @@ seqCo (FunCo r af1 af2 w co1 co2) = r `seq` af1 `seq` af2 `seq`
                                     seqCo w `seq` seqCo co1 `seq` seqCo co2
 seqCo (CoVarCo cv)              = cv `seq` ()
 seqCo (HoleCo h)                = coHoleCoVar h `seq` ()
-seqCo (AxiomInstCo con ind cos) = con `seq` ind `seq` seqCos cos
 seqCo (UnivCo { uco_prov = p, uco_role = r
               , uco_lty = t1, uco_rty = t2, uco_deps = deps })
   = p `seq` r `seq` seqType t1 `seq` seqType t2 `seq` seqCos deps
@@ -2472,22 +2465,7 @@ coercionLKind co
     go (KindCo co)               = typeKind (go co)
     go (SubCo co)                = go co
     go (SelCo d co)              = selectFromType d (go co)
-    go (AxiomInstCo ax ind cos)  = go_ax_inst ax ind (map go cos)
-    go (AxiomRuleCo ax cos)      = pFst $ expectJust "coercionKind" $
-                                   coaxrProves ax $ map coercionKind cos
-
-    go_ax_inst ax ind tys
-      | CoAxBranch { cab_tvs = tvs, cab_cvs = cvs
-                   , cab_lhs = lhs } <- coAxiomNthBranch ax ind
-      , let (tys1, cotys1) = splitAtList tvs tys
-            cos1           = map stripCoercionTy cotys1
-      = assert (tys `equalLength` (tvs ++ cvs)) $
-                  -- Invariant of AxiomInstCo: cos should
-                  -- exactly saturate the axiom branch
-        substTyWith tvs tys1       $
-        substTyWithCoVars cvs cos1 $
-        mkTyConApp (coAxiomTyCon ax) lhs
-
+    go (AxiomRuleCo ax cos)      = pFst (coAxRuleKind ax (map coercionKind cos))
     go_app :: Coercion -> [Type] -> Type
     -- Collect up all the arguments and apply all at once
     -- See Note [Nested InstCos]
@@ -2516,9 +2494,7 @@ coercionRKind co
     go (KindCo co)               = typeKind (go co)
     go (SubCo co)                = go co
     go (SelCo d co)              = selectFromType d (go co)
-    go (AxiomInstCo ax ind cos)  = go_ax_inst ax ind (map go cos)
-    go (AxiomRuleCo ax cos)      = pSnd $ expectJust "coercionKind" $
-                                   coaxrProves ax $ map coercionKind cos
+    go (AxiomRuleCo ax cos)      = pSnd (coAxRuleKind ax (map coercionKind cos))
 
     go co@(ForAllCo { fco_tcv = tv1, fco_visR = visR
                     , fco_kind = k_co, fco_body = co1 }) -- works for both tyvar and covar
@@ -2527,17 +2503,6 @@ coercionRKind co
        | otherwise                = go_forall empty_subst co
        where
          empty_subst = mkEmptySubst (mkInScopeSet $ tyCoVarsOfCo co)
-
-    go_ax_inst ax ind tys
-      | CoAxBranch { cab_tvs = tvs, cab_cvs = cvs
-                   , cab_rhs = rhs } <- coAxiomNthBranch ax ind
-      , let (tys2, cotys2) = splitAtList tvs tys
-            cos2           = map stripCoercionTy cotys2
-      = assert (tys `equalLength` (tvs ++ cvs)) $
-                  -- Invariant of AxiomInstCo: cos should
-                  -- exactly saturate the axiom branch
-        substTyWith tvs tys2 $
-        substTyWithCoVars cvs cos2 rhs
 
     go_app :: Coercion -> [Type] -> Type
     -- Collect up all the arguments and apply all at once
@@ -2588,6 +2553,26 @@ coercionRKind co
       -- when other_co is not a ForAllCo
       = substTy subst (go other_co)
 
+coAxRuleKind :: CoAxiomRule -> [Pair Type] -> Pair Type
+coAxRuleKind ax prs
+  = case ax of
+      BuiltInFamRewrite  bif -> expectJust "coAxRuleKind" (bifrw_proves  bif prs)
+      BuiltInFamInteract bif -> expectJust "coAxRuleKind" (bifint_proves bif prs)
+      UnbranchedAxiom ax     -> go_branch ax (coAxiomSingleBranch ax)
+      BranchedAxiom ax i     -> go_branch ax (coAxiomNthBranch ax i)
+  where
+    go_branch :: CoAxiom br -> CoAxBranch -> Pair Type
+    go_branch ax (CoAxBranch { cab_tvs = tvs, cab_cvs = cvs, cab_lhs = lhs_tys, cab_rhs = rhs_ty })
+      = assert (prs `equalLength` tcvs) $
+                  -- Invariant of AxiomRuleCo: cos should
+                  -- exactly saturate the axiom branch
+        Pair (substTy (zipTCvSubst tcvs ltys) (mkTyConApp tc lhs_tys))
+             (substTy (zipTCvSubst tcvs rtys) rhs_ty)
+     where
+       (ltys, rtys) = unzipPairs prs
+       tc           = coAxiomTyCon ax
+       tcvs         = tvs ++ cvs
+
 {-
 
 Note [Nested ForAllCos]
@@ -2617,7 +2602,6 @@ coercionRole = go
     go (FunCo { fco_role = r })     = r
     go (CoVarCo cv)                 = coVarRole cv
     go (HoleCo h)                   = coVarRole (coHoleCoVar h)
-    go (AxiomInstCo ax _ _)         = coAxiomRole ax
     go (UnivCo { uco_role = r })    = r
     go (SymCo co)                   = go co
     go (TransCo co1 _co2)           = go co1
@@ -2626,7 +2610,7 @@ coercionRole = go
     go (InstCo co _)                = go co
     go (KindCo {})                  = Nominal
     go (SubCo _)                    = Representational
-    go (AxiomRuleCo ax _)           = coaxrRole ax
+    go (AxiomRuleCo ax _)           = coAxiomRuleRole ax
 
 {-
 Note [Nested InstCos]

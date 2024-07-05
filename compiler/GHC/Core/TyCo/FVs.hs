@@ -62,7 +62,7 @@ import GHC.Builtin.Types.Prim( funTyFlagTyCon )
 import Data.Monoid as DM ( Any(..) )
 import GHC.Core.TyCo.Rep
 import GHC.Core.TyCon
-import GHC.Core.Coercion.Axiom( coAxiomTyCon )
+import GHC.Core.Coercion.Axiom( CoAxiomRule(..), coAxiomTyCon )
 import GHC.Utils.FV
 
 import GHC.Types.Var
@@ -668,7 +668,7 @@ tyCoFVsOfCo (CoVarCo v) fv_cand in_scope acc
 tyCoFVsOfCo (HoleCo h) fv_cand in_scope acc
   = tyCoFVsOfCoVar (coHoleCoVar h) fv_cand in_scope acc
     -- See Note [CoercionHoles and coercion free variables]
-tyCoFVsOfCo (AxiomInstCo _ _ cos) fv_cand in_scope acc = tyCoFVsOfCos cos fv_cand in_scope acc
+tyCoFVsOfCo (AxiomRuleCo _ cs)    fv_cand in_scope acc = tyCoFVsOfCos cs  fv_cand in_scope acc
 tyCoFVsOfCo (UnivCo { uco_lty = t1, uco_rty = t2, uco_deps = deps}) fv_cand in_scope acc
   = (tyCoFVsOfCos deps `unionFV` tyCoFVsOfType t1
                       `unionFV` tyCoFVsOfType t2) fv_cand in_scope acc
@@ -679,7 +679,6 @@ tyCoFVsOfCo (LRCo _ co)         fv_cand in_scope acc = tyCoFVsOfCo co fv_cand in
 tyCoFVsOfCo (InstCo co arg)     fv_cand in_scope acc = (tyCoFVsOfCo co `unionFV` tyCoFVsOfCo arg) fv_cand in_scope acc
 tyCoFVsOfCo (KindCo co)         fv_cand in_scope acc = tyCoFVsOfCo co fv_cand in_scope acc
 tyCoFVsOfCo (SubCo co)          fv_cand in_scope acc = tyCoFVsOfCo co fv_cand in_scope acc
-tyCoFVsOfCo (AxiomRuleCo _ cs)  fv_cand in_scope acc = tyCoFVsOfCos cs fv_cand in_scope acc
 
 tyCoFVsOfCoVar :: CoVar -> FV
 tyCoFVsOfCoVar v fv_cand in_scope acc
@@ -717,8 +716,8 @@ almost_devoid_co_var_of_co (FunCo { fco_mult = w, fco_arg = co1, fco_res = co2 }
   && almost_devoid_co_var_of_co co2 cv
 almost_devoid_co_var_of_co (CoVarCo v) cv = v /= cv
 almost_devoid_co_var_of_co (HoleCo h)  cv = (coHoleCoVar h) /= cv
-almost_devoid_co_var_of_co (AxiomInstCo _ _ cos) cv
-  = almost_devoid_co_var_of_cos cos cv
+almost_devoid_co_var_of_co (AxiomRuleCo _ cs) cv
+  = almost_devoid_co_var_of_cos cs cv
 almost_devoid_co_var_of_co (UnivCo { uco_lty = t1, uco_rty = t2, uco_deps = deps }) cv
   =  almost_devoid_co_var_of_cos deps cv
   && almost_devoid_co_var_of_type t1 cv
@@ -739,8 +738,6 @@ almost_devoid_co_var_of_co (KindCo co) cv
   = almost_devoid_co_var_of_co co cv
 almost_devoid_co_var_of_co (SubCo co) cv
   = almost_devoid_co_var_of_co co cv
-almost_devoid_co_var_of_co (AxiomRuleCo _ cs) cv
-  = almost_devoid_co_var_of_cos cs cv
 
 almost_devoid_co_var_of_cos :: [Coercion] -> CoVar -> Bool
 almost_devoid_co_var_of_cos [] _ = True
@@ -1129,7 +1126,7 @@ tyConsOfType ty
                                    = go_co kind_co `unionUniqSets` go_co co
      go_co (FunCo { fco_mult = m, fco_arg = a, fco_res = r })
                                    = go_co m `unionUniqSets` go_co a `unionUniqSets` go_co r
-     go_co (AxiomInstCo ax _ args) = go_ax ax `unionUniqSets` go_cos args
+     go_co (AxiomRuleCo ax args)   = go_ax ax `unionUniqSets` go_cos args
      go_co (UnivCo { uco_lty = t1, uco_rty = t2 }) = go t1 `unionUniqSets` go t2
      go_co (CoVarCo {})            = emptyUniqSet
      go_co (HoleCo {})             = emptyUniqSet
@@ -1140,7 +1137,6 @@ tyConsOfType ty
      go_co (InstCo co arg)         = go_co co `unionUniqSets` go_co arg
      go_co (KindCo co)             = go_co co
      go_co (SubCo co)              = go_co co
-     go_co (AxiomRuleCo _ cs)      = go_cos cs
 
      go_mco MRefl    = emptyUniqSet
      go_mco (MCo co) = go_co co
@@ -1148,7 +1144,11 @@ tyConsOfType ty
      go_cos cos   = foldr (unionUniqSets . go_co)  emptyUniqSet cos
 
      go_tc tc = unitUniqSet tc
-     go_ax ax = go_tc $ coAxiomTyCon ax
+
+     go_ax (UnbranchedAxiom ax)    = go_tc $ coAxiomTyCon ax
+     go_ax (BranchedAxiom ax _)    = go_tc $ coAxiomTyCon ax
+     go_ax (BuiltInFamRewrite  {}) = emptyUniqSet
+     go_ax (BuiltInFamInteract {}) = emptyUniqSet
 
 tyConsOfTypes :: [Type] -> UniqSet TyCon
 tyConsOfTypes tys = foldr (unionUniqSets . tyConsOfType) emptyUniqSet tys
@@ -1326,8 +1326,8 @@ occCheckExpand vs_to_avoid ty
       | bad_var_occ as (ch_co_var h)    = Nothing
       | otherwise                       = return co
 
-    go_co cxt (AxiomInstCo ax ind args) = do { args' <- mapM (go_co cxt) args
-                                             ; return (AxiomInstCo ax ind args') }
+    go_co cxt (AxiomRuleCo ax cs)       = do { cs' <- mapM (go_co cxt) cs
+                                             ; return (AxiomRuleCo ax cs') }
     go_co cxt co@(UnivCo { uco_lty = ty1, uco_rty = ty2 })
                                         = do { ty1' <- go cxt ty1
                                              ; ty2' <- go cxt ty2
@@ -1348,6 +1348,4 @@ occCheckExpand vs_to_avoid ty
                                              ; return (KindCo co') }
     go_co cxt (SubCo co)                = do { co' <- go_co cxt co
                                              ; return (SubCo co') }
-    go_co cxt (AxiomRuleCo ax cs)       = do { cs' <- mapM (go_co cxt) cs
-                                             ; return (AxiomRuleCo ax cs') }
 

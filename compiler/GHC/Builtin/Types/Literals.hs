@@ -159,14 +159,14 @@ tryInteractInertFam builtin_fam fam_tc tys1 tys2
     eqn = Pair (mkTyConApp fam_tc tys1) (mkTyConApp fam_tc tys2)
 
 tryMatchFam :: BuiltInSynFamily -> [Type]
-            -> Maybe (CoAxiomRule, [Type], Type)
+            -> Maybe (BuiltInFamRewrite, [Type], Type)
 -- Does this reduce on the given arguments?
 -- If it does, returns (CoAxiomRule, types to instantiate the rule at, rhs type)
--- That is: mkAxiomRuleCo coax (zipWith mkReflCo (coaxrAsmpRoles coax) ts)
+-- That is: mkAxiomRuleCo ax (zipWith mkReflCo (coAxArgRuleRoles ax) ts)
 --              :: F tys ~r rhs,
 tryMatchFam builtin_fam arg_tys
   = listToMaybe $   -- Pick first rule to match
-    [ (BuiltInFamRewrite rw_ax, inst_tys, res_ty)
+    [ (rw_ax, inst_tys, res_ty)
     | rw_ax <- sfMatchFam builtin_fam
     , Just (inst_tys,res_ty) <- [bifrw_match rw_ax arg_tys] ]
 
@@ -353,20 +353,16 @@ typeNatTyCons =
   ]
 
 
-tyConAxiomRules :: TyCon -> [CoAxiomRule]
-tyConAxiomRules tc
-  | Just ops <- isBuiltInSynFamTyCon_maybe tc
-  =    map BuiltInFamInteract (sfInteract ops)
-    ++ map BuiltInFamRewrite  (sfMatchFam ops)
-  | otherwise
-  = []
-
 -- The list of built-in type family axioms that GHC uses.
 -- If you define new axioms, make sure to include them in this list.
 -- See Note [Adding built-in type families]
 typeNatCoAxiomRules :: UniqFM FastString CoAxiomRule
-typeNatCoAxiomRules = listToUFM $ map (\x -> (coaxrName x, x)) $
-                      concatMap tyConAxiomRules typeNatTyCons
+typeNatCoAxiomRules
+  = listToUFM $
+    [ pr | tc <- typeNatTyCons
+         , Just ops <- [isBuiltInSynFamTyCon_maybe tc]
+         , pr <- [ (bifint_name bif, BuiltInFamInteract bif) | bif <- sfInteract ops ]
+              ++ [ (bifrw_name bif,  BuiltInFamRewrite  bif) | bif <- sfMatchFam ops ] ]
 
 -------------------------------------------------------------------------------
 --                   Addition (+)

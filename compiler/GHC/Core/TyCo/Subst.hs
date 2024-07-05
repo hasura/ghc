@@ -57,7 +57,7 @@ import {-# SOURCE #-} GHC.Core.Coercion
    ( mkCoVarCo, mkKindCo, mkSelCo, mkTransCo
    , mkNomReflCo, mkSubCo, mkSymCo
    , mkFunCo2, mkForAllCo, mkUnivCo
-   , mkAxiomInstCo, mkAppCo, mkGReflCo
+   , mkAxiomRuleCo, mkAppCo, mkGReflCo
    , mkInstCo, mkLRCo, mkTyConAppCo
    , mkCoercionType
    , coercionKind, coercionLKind, coVarKindsTypesRole )
@@ -879,6 +879,7 @@ subst_co subst co
     go (Refl ty)             = mkNomReflCo $! (go_ty ty)
     go (GRefl r ty mco)      = (mkGReflCo r $! (go_ty ty)) $! (go_mco mco)
     go (TyConAppCo r tc args)= mkTyConAppCo r tc $! go_cos args
+    go (AxiomRuleCo con cos) = mkAxiomRuleCo con $! go_cos cos
     go (AppCo co arg)        = (mkAppCo $! go co) $! go arg
     go (ForAllCo tv visL visR kind_co co)
       = case substForAllCoBndrUnchecked subst tv kind_co of
@@ -886,7 +887,6 @@ subst_co subst co
           ((mkForAllCo $! tv') visL visR $! kind_co') $! subst_co subst' co
     go (FunCo r afl afr w co1 co2)   = ((mkFunCo2 r afl afr $! go w) $! go co1) $! go co2
     go (CoVarCo cv)          = substCoVar subst cv
-    go (AxiomInstCo con ind cos) = mkAxiomInstCo con ind $! map go cos
     go (UnivCo { uco_prov = p, uco_role = r
                , uco_lty = t1, uco_rty = t2, uco_deps = deps })
                              = ((((mkUnivCo $! p) $! go_cos deps) $! r) $!
@@ -898,8 +898,6 @@ subst_co subst co
     go (InstCo co arg)       = (mkInstCo $! (go co)) $! go arg
     go (KindCo co)           = mkKindCo $! (go co)
     go (SubCo co)            = mkSubCo $! (go co)
-    go (AxiomRuleCo c cs)    = let cs1 = map go cs
-                                in cs1 `seqList` AxiomRuleCo c cs1
     go (HoleCo h)            = HoleCo $! go_hole h
 
     go_cos cos = let cos' = map go cos

@@ -707,11 +707,10 @@ tc_iface_decl _ _ (IfaceData {ifName = tc_name,
       = do { tc_rep_name <- newTyConRepName tc_name
            ; return (VanillaAlgTyCon tc_rep_name) }
     tc_parent _ (IfDataInstance ax_name _ arg_tys)
-      = do { ax <- tcIfaceCoAxiom ax_name
+      = do { ax <- tcIfaceUnbranchedAxiom ax_name
            ; let fam_tc  = coAxiomTyCon ax
-                 ax_unbr = toUnbranchedAxiom ax
            ; lhs_tys <- tcIfaceAppArgs arg_tys
-           ; return (DataFamInstTyCon ax_unbr fam_tc lhs_tys) }
+           ; return (DataFamInstTyCon ax fam_tc lhs_tys) }
 
 tc_iface_decl _ _ (IfaceSynonym {ifName = tc_name,
                                       ifRoles = roles,
@@ -748,7 +747,7 @@ tc_iface_decl parent _ (IfaceFamily {ifName = tc_name,
             ; return (DataFamilyTyCon tc_rep_name) }
      tc_fam_flav _ IfaceOpenSynFamilyTyCon= return OpenSynFamilyTyCon
      tc_fam_flav _ (IfaceClosedSynFamilyTyCon mb_ax_name_branches)
-       = do { ax <- traverse (tcIfaceCoAxiom . fst) mb_ax_name_branches
+       = do { ax <- traverse (tcIfaceBranchedAxiom . fst) mb_ax_name_branches
             ; return (ClosedSynFamilyTyCon ax) }
      tc_fam_flav _ IfaceAbstractClosedSynFamilyTyCon
          = return AbstractClosedSynFamilyTyCon
@@ -1244,11 +1243,10 @@ tcIfaceFamInst (IfaceFamInst { ifFamInstFam = fam, ifFamInstTys = mb_tcs
                              , ifFamInstAxiom = axiom_name
                              , ifFamInstOrph = orphan } )
     = do { axiom' <- forkM (text "Axiom" <+> ppr axiom_name) $
-                     tcIfaceCoAxiom axiom_name
+                     tcIfaceUnbranchedAxiom axiom_name
              -- will panic if branched, but that's OK
-         ; let axiom'' = toUnbranchedAxiom axiom'
-               mb_tcs' = map tcRoughTyCon mb_tcs
-         ; return (mkImportedFamInst fam mb_tcs' axiom'' orphan) }
+         ; let mb_tcs' = map tcRoughTyCon mb_tcs
+         ; return (mkImportedFamInst fam mb_tcs' axiom' orphan) }
 
 {-
 ************************************************************************
@@ -1472,7 +1470,6 @@ tcIfaceCo = go
                                       ; bindIfaceBndr tv $ \ tv' ->
                                         ForAllCo tv' visL visR k' <$> go c }
     go (IfaceCoVarCo n)           = CoVarCo <$> go_var n
-    go (IfaceAxiomInstCo n i cs)  = AxiomInstCo <$> tcIfaceCoAxiom n <*> pure i <*> mapM go cs
     go (IfaceUnivCo p r t1 t2 ds) = do { t1' <- tcIfaceType t1; t2' <- tcIfaceType t2
                                        ; ds' <- mapM go ds
                                        ; return (UnivCo { uco_prov = p, uco_role = r
@@ -2023,21 +2020,28 @@ tcIfaceTyCon (IfaceTyCon name _info)
               AConLike (RealDataCon dc) -> return (promoteDataCon dc)
               _ -> pprPanic "tcIfaceTyCon" (ppr thing) }
 
-tcIfaceCoAxiom :: Name -> IfL (CoAxiom Branched)
-tcIfaceCoAxiom name = do { thing <- tcIfaceImplicit name
-                         ; return (tyThingCoAxiom thing) }
-
-
-tcIfaceCoAxiomRule :: IfLclName -> IfL CoAxiomRule
+tcIfaceCoAxiomRule :: IfaceAxiomRule -> IfL CoAxiomRule
 -- Unlike CoAxioms, which arise from user 'type instance' declarations,
 -- there are a fixed set of CoAxiomRules:
 --   - axioms for type-level literals (Nat and Symbol),
 --     enumerated in typeNatCoAxiomRules
-tcIfaceCoAxiomRule n
-  | Just ax <- lookupUFM typeNatCoAxiomRules (ifLclNameFS n)
-  = return ax
+tcIfaceCoAxiomRule (IfaceAR_X n)
+  | Just axr <- lookupUFM typeNatCoAxiomRules (ifLclNameFS n)
+  = return axr
   | otherwise
   = pprPanic "tcIfaceCoAxiomRule" (ppr n)
+tcIfaceCoAxiomRule (IfaceAR_U name)   = do { ax <- tcIfaceUnbranchedAxiom name; return (UnbranchedAxiom ax) }
+tcIfaceCoAxiomRule (IfaceAR_B name i) = do { ax <- tcIfaceBranchedAxiom name;   return (BranchedAxiom ax i) }
+
+tcIfaceUnbranchedAxiom :: IfExtName -> IfL (CoAxiom Unbranched)
+tcIfaceUnbranchedAxiom name
+  = do { thing <- tcIfaceImplicit name
+       ; return (toUnbranchedAxiom (tyThingCoAxiom thing)) }
+
+tcIfaceBranchedAxiom :: IfExtName -> IfL (CoAxiom Branched)
+tcIfaceBranchedAxiom name
+  = do { thing <- tcIfaceImplicit name
+       ; return (tyThingCoAxiom thing) }
 
 tcIfaceDataCon :: Name -> IfL DataCon
 tcIfaceDataCon name = do { thing <- tcIfaceGlobal name

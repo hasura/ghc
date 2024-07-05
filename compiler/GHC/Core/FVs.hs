@@ -40,7 +40,7 @@ module GHC.Core.FVs (
 
         -- * Orphan names
         orphNamesOfType, orphNamesOfTypes,
-        orphNamesOfCo,  orphNamesOfCoCon, orphNamesOfAxiomLHS,
+        orphNamesOfCo, orphNamesOfAxiomLHS,
         exprsOrphNames,
 
         -- * Core syntax tree annotation with free variables
@@ -394,7 +394,7 @@ orphNamesOfCo (FunCo { fco_mult = co_mult, fco_arg = co1, fco_res = co2 })
                                       `unionNameSet` orphNamesOfCo co1
                                       `unionNameSet` orphNamesOfCo co2
 orphNamesOfCo (CoVarCo _)           = emptyNameSet
-orphNamesOfCo (AxiomInstCo con _ cos) = orphNamesOfCoCon con `unionNameSet` orphNamesOfCos cos
+orphNamesOfCo (AxiomRuleCo con cos) = orphNamesOfAxRule con `unionNameSet` orphNamesOfCos cos
 orphNamesOfCo (UnivCo { uco_lty = t1, uco_rty = t2 })
                                     = orphNamesOfType t1 `unionNameSet` orphNamesOfType t2
 orphNamesOfCo (SymCo co)            = orphNamesOfCo co
@@ -404,14 +404,19 @@ orphNamesOfCo (LRCo  _ co)          = orphNamesOfCo co
 orphNamesOfCo (InstCo co arg)       = orphNamesOfCo co `unionNameSet` orphNamesOfCo arg
 orphNamesOfCo (KindCo co)           = orphNamesOfCo co
 orphNamesOfCo (SubCo co)            = orphNamesOfCo co
-orphNamesOfCo (AxiomRuleCo _ cs)    = orphNamesOfCos cs
 orphNamesOfCo (HoleCo _)            = emptyNameSet
 
 orphNamesOfCos :: [Coercion] -> NameSet
 orphNamesOfCos = orphNamesOfThings orphNamesOfCo
 
-orphNamesOfCoCon :: CoAxiom br -> NameSet
-orphNamesOfCoCon (CoAxiom { co_ax_tc = tc, co_ax_branches = branches })
+orphNamesOfAxRule :: CoAxiomRule -> NameSet
+orphNamesOfAxRule (BuiltInFamRewrite {})  = emptyNameSet
+orphNamesOfAxRule (BuiltInFamInteract {}) = emptyNameSet
+orphNamesOfAxRule (UnbranchedAxiom ax)    = orphNamesOfCoAx ax
+orphNamesOfAxRule (BranchedAxiom ax _)    = orphNamesOfCoAx ax
+
+orphNamesOfCoAx :: CoAxiom br -> NameSet
+orphNamesOfCoAx (CoAxiom { co_ax_tc = tc, co_ax_branches = branches })
   = orphNamesOfTyCon tc `unionNameSet` orphNamesOfCoAxBranches branches
 
 orphNamesOfCoAxBranches :: Branches br -> NameSet

@@ -31,7 +31,8 @@ module GHC.Core.Coercion.Axiom (
        Role(..), fsFromRole,
 
        CoAxiomRule(..), BuiltInFamRewrite(..), BuiltInFamInteract(..), TypeEqn,
-       coaxrName, coaxrAsmpRoles, coaxrRole, coaxrProves,
+       coAxiomRuleArgRoles, coAxiomRuleRole,
+       coAxiomRuleBranch_maybe, isNewtypeAxiomRule_maybe,
        BuiltInSynFamily(..), trivialBuiltInFamily
        ) where
 
@@ -41,7 +42,7 @@ import Language.Haskell.Syntax.Basic (Role(..))
 
 import {-# SOURCE #-} GHC.Core.TyCo.Rep ( Type )
 import {-# SOURCE #-} GHC.Core.TyCo.Ppr ( pprType, pprTyVar )
-import {-# SOURCE #-} GHC.Core.TyCon    ( TyCon )
+import {-# SOURCE #-} GHC.Core.TyCon    ( TyCon, isNewTyCon )
 import GHC.Utils.Outputable
 import GHC.Data.FastString
 import GHC.Types.Name
@@ -80,12 +81,12 @@ axF :: {                                         F [Int] ~ Bool
        ; forall (k :: *) (a :: k -> *) (b :: k). F (a b) ~ Char
        }
 
-The axiom is used with the AxiomInstCo constructor of Coercion. If we wish
+The axiom is used with the AxiomRuleCo constructor of Coercion. If we wish
 to have a coercion showing that F (Maybe Int) ~ Char, it will look like
 
 axF[2] <*> <Maybe> <Int> :: F (Maybe Int) ~ Char
 -- or, written using concrete-ish syntax --
-AxiomInstCo axF 2 [Refl *, Refl Maybe, Refl Int]
+AxiomRuleCo axF 2 [Refl *, Refl Maybe, Refl Int]
 
 Note that the index is 0-based.
 
@@ -128,8 +129,21 @@ type variable is accurate.
 ************************************************************************
 -}
 
-type BranchIndex = Int  -- The index of the branch in the list of branches
-                        -- Counting from zero
+{- Note [BranchIndex]
+~~~~~~~~~~~~~~~~~~~~
+A CoAxiom has 1 or more branches. Each branch has contains a list
+of the free type variables in that branch, the LHS type patterns,
+and the RHS type for that branch. When we apply an axiom to a list
+of coercions, we must choose which branch of the axiom we wish to
+use, as the different branches may have different numbers of free
+type variables. (The number of type patterns is always the same
+among branches, but that doesn't quite concern us here.)
+-}
+
+
+type BranchIndex = Int         -- Counting from zero
+      -- The index of the branch in the list of branches
+      -- See Note [BranchIndex]
 
 -- promoted data type
 data BranchFlag = Branched | Unbranched
@@ -279,10 +293,6 @@ toUnbranchedAxiom (CoAxiom unique name role tc branches implicit)
 coAxiomNumPats :: CoAxiom br -> Int
 coAxiomNumPats = length . coAxBranchLHS . (flip coAxiomNthBranch 0)
 
-coAxiomNthBranch :: CoAxiom br -> BranchIndex -> CoAxBranch
-coAxiomNthBranch (CoAxiom { co_ax_branches = bs }) index
-  = branchesNth bs index
-
 coAxiomArity :: CoAxiom br -> BranchIndex -> Arity
 coAxiomArity ax index
   = length tvs + length cvs
@@ -297,16 +307,20 @@ coAxiomRole = co_ax_role
 coAxiomBranches :: CoAxiom br -> Branches br
 coAxiomBranches = co_ax_branches
 
+coAxiomNthBranch :: CoAxiom br -> BranchIndex -> CoAxBranch
+coAxiomNthBranch (CoAxiom { co_ax_branches = bs }) index
+  = branchesNth bs index
+
+coAxiomSingleBranch :: CoAxiom Unbranched -> CoAxBranch
+coAxiomSingleBranch (CoAxiom { co_ax_branches = MkBranches arr })
+  = arr ! 0
+
 coAxiomSingleBranch_maybe :: CoAxiom br -> Maybe CoAxBranch
 coAxiomSingleBranch_maybe (CoAxiom { co_ax_branches = MkBranches arr })
   | snd (bounds arr) == 0
   = Just $ arr ! 0
   | otherwise
   = Nothing
-
-coAxiomSingleBranch :: CoAxiom Unbranched -> CoAxBranch
-coAxiomSingleBranch (CoAxiom { co_ax_branches = MkBranches arr })
-  = arr ! 0
 
 coAxiomTyCon :: CoAxiom br -> TyCon
 coAxiomTyCon = co_ax_tc
@@ -580,29 +594,79 @@ CoAxiomRules come in two flavours:
 
 -}
 
--- | A more explicit representation for `t1 ~ t2`.
-type TypeEqn = Pair Type
-
 -- | CoAxiomRule is a sum type that joins BuiltInFamRewrite and BuiltInFamInteract
 data CoAxiomRule
   = BuiltInFamRewrite  BuiltInFamRewrite
   | BuiltInFamInteract BuiltInFamInteract
+  | BranchedAxiom      (CoAxiom Branched) BranchIndex
+  | UnbranchedAxiom    (CoAxiom Unbranched)
 
-coaxrName :: CoAxiomRule -> FastString
-coaxrName (BuiltInFamRewrite  bif) = bifrw_name bif
-coaxrName (BuiltInFamInteract bif) = bifint_name bif
+instance Eq CoAxiomRule where
+  (BuiltInFamRewrite  bif1) == (BuiltInFamRewrite  bif2) = bifrw_name  bif1 == bifrw_name bif2
+  (BuiltInFamInteract bif1) == (BuiltInFamInteract bif2) = bifint_name bif1 == bifint_name bif2
+  (UnbranchedAxiom ax1)     == (UnbranchedAxiom ax2)      = getUnique ax1 == getUnique ax2
+  (BranchedAxiom ax1 i1)    == (BranchedAxiom ax2 i2) = getUnique ax1 == getUnique ax2 && i1 == i2
+  _ == _ = False
 
-coaxrAsmpRoles :: CoAxiomRule -> [Role]
-coaxrAsmpRoles (BuiltInFamRewrite  bif) = bifrw_arg_roles  bif
-coaxrAsmpRoles (BuiltInFamInteract bif) = bifint_arg_roles bif
+coAxiomRuleRole :: CoAxiomRule -> Role
+coAxiomRuleRole (BuiltInFamRewrite  bif) = bifrw_res_role bif
+coAxiomRuleRole (BuiltInFamInteract bif) = bifint_res_role bif
+coAxiomRuleRole (UnbranchedAxiom ax)     = coAxiomRole ax
+coAxiomRuleRole (BranchedAxiom ax _)     = coAxiomRole ax
 
-coaxrRole :: CoAxiomRule -> Role
-coaxrRole (BuiltInFamRewrite  bif) = bifrw_res_role bif
-coaxrRole (BuiltInFamInteract bif) = bifint_res_role bif
+coAxiomRuleArgRoles :: CoAxiomRule -> [Role]
+coAxiomRuleArgRoles (BuiltInFamRewrite  bif) = bifrw_arg_roles  bif
+coAxiomRuleArgRoles (BuiltInFamInteract bif) = bifint_arg_roles bif
+coAxiomRuleArgRoles (UnbranchedAxiom ax)     = coAxBranchRoles (coAxiomSingleBranch ax)
+coAxiomRuleArgRoles (BranchedAxiom ax i)     = coAxBranchRoles (coAxiomNthBranch ax i)
 
-coaxrProves :: CoAxiomRule -> [TypeEqn] -> Maybe TypeEqn
-coaxrProves (BuiltInFamRewrite  bif) = bifrw_proves bif
-coaxrProves (BuiltInFamInteract bif) = bifint_proves bif
+coAxiomRuleBranch_maybe :: CoAxiomRule -> Maybe (TyCon, Role, CoAxBranch)
+coAxiomRuleBranch_maybe (UnbranchedAxiom ax) = Just (co_ax_tc ax, co_ax_role ax, coAxiomSingleBranch ax)
+coAxiomRuleBranch_maybe (BranchedAxiom ax i) = Just (co_ax_tc ax, co_ax_role ax, coAxiomNthBranch ax i)
+coAxiomRuleBranch_maybe _                    = Nothing
+
+isNewtypeAxiomRule_maybe :: CoAxiomRule -> Maybe (TyCon, CoAxBranch)
+isNewtypeAxiomRule_maybe (UnbranchedAxiom ax)
+  | let tc = coAxiomTyCon ax, isNewTyCon tc = Just (tc, coAxiomSingleBranch ax)
+isNewtypeAxiomRule_maybe _                  = Nothing
+
+instance Data.Data CoAxiomRule where
+  -- don't traverse?
+  toConstr _   = abstractConstr "CoAxiomRule"
+  gunfold _ _  = error "gunfold"
+  dataTypeOf _ = mkNoRepType "CoAxiomRule"
+
+--instance Ord CoAxiomRule where
+--  -- we compare lexically to avoid non-deterministic output when sets of rules
+--  -- are printed
+--  compare x y = lexicalCompareFS (coaxrName x) (coaxrName y)
+
+instance Outputable CoAxiomRule where
+  ppr (BuiltInFamRewrite  bif) = ppr (bifrw_name bif)
+  ppr (BuiltInFamInteract bif) = ppr (bifint_name bif)
+  ppr (UnbranchedAxiom ax)     = ppr (coAxiomName ax)
+  ppr (BranchedAxiom ax i)     = ppr (coAxiomName ax) <> brackets (int i)
+
+{- *********************************************************************
+*                                                                      *
+                    Built-in families
+*                                                                      *
+********************************************************************* -}
+
+
+-- | A more explicit representation for `t1 ~ t2`.
+type TypeEqn = Pair Type
+
+-- Type checking of built-in families
+data BuiltInSynFamily = BuiltInSynFamily
+  { sfMatchFam      :: [BuiltInFamRewrite]
+
+  , sfInteract:: [BuiltInFamInteract]
+    -- If given these type arguments and RHS, returns the equalities that
+    -- are guaranteed to hold.  That is, if
+    --     (ar, Pair s1 s2)  is an element of  (sfInteract tys ty)
+    -- then  AxiomRule ar [co :: F tys ~ ty]  ::  s1~s2
+  }
 
 data BuiltInFamInteract
   = BIF_Interact
@@ -610,7 +674,7 @@ data BuiltInFamInteract
       , bifint_arg_roles :: [Role]    -- roles of parameter equations
       , bifint_res_role  :: Role      -- role of resulting equation
       , bifint_proves    :: [TypeEqn] -> Maybe TypeEqn
-            -- ^ coaxrProves returns @Nothing@ when it doesn't like
+            -- ^ Returns @Nothing@ when it doesn't like
             -- the supplied arguments.  When this happens in a coercion
             -- that means that the coercion is ill-formed, and Core Lint
             -- checks for that.
@@ -625,43 +689,11 @@ data BuiltInFamRewrite
       , bifrw_match :: [Type] -> Maybe ([Type], Type)   -- Instantiating types and result type
            -- coaxrMatch: does this reduce on the given arguments?
            -- If it does, returns (CoAxiomRule, types to instantiate the rule at, rhs type)
-           -- That is: mkAxiomRuleCo coax (zipWith mkReflCo coaxrAsmpRoles ts)
+           -- That is: mkAxiomRuleCo ax (zipWith mkReflCo coAxiomRuleArgRoles ts)
            --              :: F tys ~coaxrRole rhs,
 
       , bifrw_proves :: [TypeEqn] -> Maybe TypeEqn }
 
-instance Data.Data CoAxiomRule where
-  -- don't traverse?
-  toConstr _   = abstractConstr "CoAxiomRule"
-  gunfold _ _  = error "gunfold"
-  dataTypeOf _ = mkNoRepType "CoAxiomRule"
-
-instance Uniquable CoAxiomRule where
-  getUnique = getUnique . coaxrName
-
-instance Eq CoAxiomRule where
-  x == y = coaxrName x == coaxrName y
-
-instance Ord CoAxiomRule where
-  -- we compare lexically to avoid non-deterministic output when sets of rules
-  -- are printed
-  compare x y = lexicalCompareFS (coaxrName x) (coaxrName y)
-
-instance Outputable CoAxiomRule where
-  ppr = ppr . coaxrName
-
--- Type checking of built-in families
-data BuiltInSynFamily = BuiltInSynFamily
-  { sfMatchFam      :: [BuiltInFamRewrite]
-
-  , sfInteract:: [BuiltInFamInteract]
-    -- If given these type arguments and RHS, returns the equalities that
-    -- are guaranteed to hold.  That is, if
-    --     (ar, Pair s1 s2)  is an element of  (sfInteract tys ty)
-    -- then  AxiomRule ar [co :: F tys ~ ty]  ::  s1~s2
-  }
-
 -- Provides default implementations that do nothing.
 trivialBuiltInFamily :: BuiltInSynFamily
 trivialBuiltInFamily = BuiltInSynFamily { sfMatchFam = [], sfInteract = [] }
-
