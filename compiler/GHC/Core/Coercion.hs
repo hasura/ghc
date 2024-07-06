@@ -2465,12 +2465,35 @@ coercionLKind co
     go (KindCo co)               = typeKind (go co)
     go (SubCo co)                = go co
     go (SelCo d co)              = selectFromType d (go co)
-    go (AxiomRuleCo ax cos)      = pFst (coAxRuleKind ax (map coercionKind cos))
+    go (AxiomRuleCo ax cos)      = go_ax ax cos
+
     go_app :: Coercion -> [Type] -> Type
     -- Collect up all the arguments and apply all at once
     -- See Note [Nested InstCos]
     go_app (InstCo co arg) args = go_app co (go arg:args)
     go_app co              args = piResultTys (go co) args
+
+    -- Tiresome to near-duplicate this, but coercionKind
+    -- is a very hot cod path
+    go_ax (BuiltInFamRewrite  bif) cos = go_bif (bifrw_proves bif)  cos
+    go_ax (BuiltInFamInteract bif) cos = go_bif (bifint_proves bif) cos
+    go_ax (UnbranchedAxiom ax)     cos = go_branch ax (coAxiomSingleBranch ax) cos
+    go_ax (BranchedAxiom ax i)     cos = go_branch ax (coAxiomNthBranch ax i)  cos
+
+    go_bif proves cos = pFst $ expectJust "coAxRuleKind" $ proves $
+                        map coercionKind cos
+
+    go_branch :: CoAxiom br -> CoAxBranch -> [Coercion] -> Type
+    go_branch ax (CoAxBranch { cab_tvs = tvs, cab_cvs = cvs, cab_lhs = lhs_tys }) cos
+      = assert (cos `equalLength` tcvs) $
+                  -- Invariant of AxiomRuleCo: cos should
+                  -- exactly saturate the axiom branch
+        substTy (zipTCvSubst tcvs ltys) (mkTyConApp tc lhs_tys)
+     where
+       tc   = coAxiomTyCon ax
+       tcvs | null cvs  = tvs  -- Very common case (currently always!)
+            | otherwise = tvs ++ cvs
+       ltys = map go cos  -- `go` is `coercionLKind`
 
 coercionRKind :: HasDebugCallStack => Coercion -> Type
 coercionRKind co
@@ -2494,7 +2517,7 @@ coercionRKind co
     go (KindCo co)               = typeKind (go co)
     go (SubCo co)                = go co
     go (SelCo d co)              = selectFromType d (go co)
-    go (AxiomRuleCo ax cos)      = pSnd (coAxRuleKind ax (map coercionKind cos))
+    go (AxiomRuleCo ax cos)      = go_ax ax cos
 
     go co@(ForAllCo { fco_tcv = tv1, fco_visR = visR
                     , fco_kind = k_co, fco_body = co1 }) -- works for both tyvar and covar
@@ -2553,26 +2576,26 @@ coercionRKind co
       -- when other_co is not a ForAllCo
       = substTy subst (go other_co)
 
-coAxRuleKind :: CoAxiomRule -> [Pair Type] -> Pair Type
-coAxRuleKind ax prs
-  = case ax of
-      BuiltInFamRewrite  bif -> expectJust "coAxRuleKind" (bifrw_proves  bif prs)
-      BuiltInFamInteract bif -> expectJust "coAxRuleKind" (bifint_proves bif prs)
-      UnbranchedAxiom ax     -> go_branch ax (coAxiomSingleBranch ax)
-      BranchedAxiom ax i     -> go_branch ax (coAxiomNthBranch ax i)
-  where
-    go_branch :: CoAxiom br -> CoAxBranch -> Pair Type
-    go_branch ax (CoAxBranch { cab_tvs = tvs, cab_cvs = cvs, cab_lhs = lhs_tys, cab_rhs = rhs_ty })
-      = assert (prs `equalLength` tcvs) $
+    -- Tiresome to near-duplicate this, but coercionKind
+    -- is a very hot cod path
+    go_ax (BuiltInFamRewrite  bif) cos = go_bif (bifrw_proves bif)  cos
+    go_ax (BuiltInFamInteract bif) cos = go_bif (bifint_proves bif) cos
+    go_ax (UnbranchedAxiom ax)     cos = go_branch (coAxiomSingleBranch ax) cos
+    go_ax (BranchedAxiom ax i)     cos = go_branch (coAxiomNthBranch ax i)  cos
+
+    go_bif proves cos = pSnd $ expectJust "coAxRuleKind" $ proves $
+                        map coercionKind cos
+
+    go_branch :: CoAxBranch -> [Coercion] -> Type
+    go_branch (CoAxBranch { cab_tvs = tvs, cab_cvs = cvs, cab_rhs = rhs_ty }) cos
+      = assert (cos `equalLength` tcvs) $
                   -- Invariant of AxiomRuleCo: cos should
                   -- exactly saturate the axiom branch
-        Pair (substTy (zipTCvSubst tcvs ltys) (mkTyConApp tc lhs_tys))
-             (substTy (zipTCvSubst tcvs rtys) rhs_ty)
+        substTy (zipTCvSubst tcvs rtys) rhs_ty
      where
-       (ltys, rtys) = unzipPairs prs
-       tc           = coAxiomTyCon ax
-       tcvs         = tvs ++ cvs
-
+       tcvs | null cvs  = tvs  -- Very common case (currently always!)
+            | otherwise = tvs ++ cvs
+       rtys = map go cos  -- `go` is `coercionRKind`
 {-
 
 Note [Nested ForAllCos]
