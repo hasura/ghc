@@ -301,6 +301,15 @@ else
 set_list_broken =
 endif
 
+# Semantically copied from exe_extension at testsuite/driver/testlib.py
+ifeq "$(TargetARCH_CPP)" "wasm32"
+EXE_EXTENSION_TEST = ".wasm"
+else ifeq "$(TargetOS_CPP)" "mingw32"
+EXE_EXTENSION_TEST = ".exe"
+else
+EXE_EXTENSION_TEST = ""
+endif
+
 # See Note [validate and testsuite speed] in `validate`
 ifneq "$(SPEED)" ""
 setspeed = -e config.speed="$(SPEED)"

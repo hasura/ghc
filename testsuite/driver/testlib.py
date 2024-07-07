@@ -922,6 +922,7 @@ KNOWN_OPERATING_SYSTEMS = set([
     'solaris2',
 ])
 
+# Keep in sync with testsuite/mk/test.mk
 def exe_extension() -> str:
     if wasm_arch():
         return '.wasm'

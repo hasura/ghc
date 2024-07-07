@@ -3,7 +3,12 @@ test('size_hello_obj', [collect_size(5, 'size_hello_obj.o')], compile, [''])
 test('size_hello_artifact', [collect_size(5, 'size_hello_artifact' + exe_extension())],
                              compile_artifact, [''])
 
+test('size_hello_artifact_gzip', [extra_files(['./size_hello_artifact.hs']), collect_size(5, 'size_hello_artifact' + exe_extension() + '.gz')],
+                             makefile_test, ['size_hello_artifact_gzip'])
+
 test('size_hello_unicode', [collect_size(5, 'size_hello_unicode' + exe_extension())], compile_artifact, [''])
+
+test('size_hello_unicode_gzip', [extra_files(['./size_hello_unicode.hs']), collect_size(5, 'size_hello_unicode' + exe_extension() + '.gz')], makefile_test, ['size_hello_unicode_gzip'])
 
 size_acceptance_threshold = 100
 
