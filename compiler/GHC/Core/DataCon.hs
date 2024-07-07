@@ -1338,7 +1338,7 @@ dataConKindEqSpec (MkData {dcExTyCoVars = ex_tcvs})
   = [ EqSpec tv ty
     | cv <- ex_tcvs
     , isCoVar cv
-    , let (_, _, ty1, ty, _) = coVarKindsTypesRole cv
+    , let (ty1, ty, _) = coVarTypesRole cv
           tv = getTyVar ty1
     ]
 

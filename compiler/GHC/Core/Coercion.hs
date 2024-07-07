@@ -24,7 +24,7 @@ module GHC.Core.Coercion (
 
         -- ** Functions over coercions
         coVarRType, coVarLType, coVarTypes,
-        coVarKind, coVarKindsTypesRole, coVarRole,
+        coVarKind, coVarTypesRole, coVarRole,
         coercionType, mkCoercionType,
         coercionKind, coercionLKind, coercionRKind,coercionKinds,
         coercionRole, coercionKindRole,
@@ -581,20 +581,18 @@ splitForAllCo_co_maybe _ = Nothing
 -- and some coercion kind stuff
 
 coVarLType, coVarRType :: HasDebugCallStack => CoVar -> Type
-coVarLType cv | (_, _, ty1, _, _) <- coVarKindsTypesRole cv = ty1
-coVarRType cv | (_, _, _, ty2, _) <- coVarKindsTypesRole cv = ty2
+coVarLType cv | (ty1, _, _) <- coVarTypesRole cv = ty1
+coVarRType cv | (_, ty2, _) <- coVarTypesRole cv = ty2
 
 coVarTypes :: HasDebugCallStack => CoVar -> Pair Type
-coVarTypes cv
-  | (_, _, ty1, ty2, _) <- coVarKindsTypesRole cv
-  = Pair ty1 ty2
+coVarTypes cv | (ty1, ty2, _) <- coVarTypesRole cv = Pair ty1 ty2
 
-coVarKindsTypesRole :: HasDebugCallStack => CoVar -> (Kind,Kind,Type,Type,Role)
-coVarKindsTypesRole cv
- | Just (tc, [k1,k2,ty1,ty2]) <- splitTyConApp_maybe (varType cv)
- = (k1, k2, ty1, ty2, eqTyConRole tc)
+coVarTypesRole :: HasDebugCallStack => CoVar -> (Type,Type,Role)
+coVarTypesRole cv
+ | Just (tc, [_,_,ty1,ty2]) <- splitTyConApp_maybe (varType cv)
+ = (ty1, ty2, eqTyConRole tc)
  | otherwise
- = pprPanic "coVarKindsTypesRole, non coercion variable"
+ = pprPanic "coVarTypesRole, non coercion variable"
             (ppr cv $$ ppr (varType cv))
 
 coVarKind :: CoVar -> Type
@@ -2091,7 +2089,7 @@ extendLiftingContextEx lc@(LC subst env) ((v,ty):rest)
     -- lift_s2 :: s2 ~r s2'
     -- kco     :: (s1 ~r s2) ~N (s1' ~r s2')
     assert (isCoVar v) $
-    let (_, _, s1, s2, r) = coVarKindsTypesRole v
+    let (s1, s2, r) = coVarTypesRole v
         lift_s1 = ty_co_subst lc r s1
         lift_s2 = ty_co_subst lc r s2
         kco     = mkTyConAppCo Nominal (equalityTyCon r)
@@ -2442,23 +2440,26 @@ coercionType co = case coercionKindRole co of
 coercionKind :: HasDebugCallStack => Coercion -> Pair Type
 coercionKind co = Pair (coercionLKind co) (coercionRKind co)
 
-coercionLKind :: HasDebugCallStack => Coercion -> Type
-coercionLKind co
+coercionLKind, coercionRKind :: HasDebugCallStack => Coercion -> Type
+coercionLKind co = coercion_lr_kind CLeft  co
+coercionRKind co = coercion_lr_kind CRight co
+
+coercion_lr_kind :: HasDebugCallStack => LeftOrRight -> Coercion -> Type
+{-# INLINE coercion_lr_kind #-}
+coercion_lr_kind which co
   = go co
   where
     go (Refl ty)                 = ty
     go (GRefl _ ty _)            = ty
     go (TyConAppCo _ tc cos)     = mkTyConApp tc (map go cos)
     go (AppCo co1 co2)           = mkAppTy (go co1) (go co2)
-    go (ForAllCo { fco_tcv = tv1, fco_visL = visL, fco_body = co1 })
-                                 = mkTyCoForAllTy tv1 visL (go co1)
     go (FunCo { fco_afl = af, fco_mult = mult, fco_arg = arg, fco_res = res})
        {- See Note [FunCo] -}    = FunTy { ft_af = af, ft_mult = go mult
                                          , ft_arg = go arg, ft_res = go res }
-    go (CoVarCo cv)              = coVarLType cv
-    go (HoleCo h)                = coVarLType (coHoleCoVar h)
+    go (CoVarCo cv)              = go_covar cv
+    go (HoleCo h)                = go_covar (coHoleCoVar h)
     go (UnivCo { uco_lty = ty1}) = ty1
-    go (SymCo co)                = coercionRKind co
+    go (SymCo co)                = pickLR which (coercionRKind co, coercionLKind co)
     go (TransCo co1 _)           = go co1
     go (LRCo lr co)              = pickLR lr (splitAppTy (go co))
     go (InstCo aco arg)          = go_app aco [go arg]
@@ -2467,77 +2468,66 @@ coercionLKind co
     go (SelCo d co)              = selectFromType d (go co)
     go (AxiomRuleCo ax cos)      = go_ax ax cos
 
+    go co@(ForAllCo { fco_tcv = tv1, fco_visL = visL, fco_visR = visR
+                    , fco_kind = k_co, fco_body = co1 })
+      = case which of
+          CLeft  -> mkTyCoForAllTy tv1 visL (go co1)
+          CRight | isGReflCo k_co  -- kind_co always has kind `Type`, thus `isGReflCo`
+                 -> mkTyCoForAllTy tv1 visR (go co1)
+                 | otherwise
+                 -> go_forall_right empty_subst co
+      where
+         empty_subst = mkEmptySubst (mkInScopeSet $ tyCoVarsOfCo co)
+
+    -------------
+    go_covar cv = pickLR which (coVarLType cv, coVarRType cv)
+
+    -------------
     go_app :: Coercion -> [Type] -> Type
     -- Collect up all the arguments and apply all at once
     -- See Note [Nested InstCos]
     go_app (InstCo co arg) args = go_app co (go arg:args)
     go_app co              args = piResultTys (go co) args
 
-    -- Tiresome to near-duplicate this, but coercionKind
-    -- is a very hot cod path
+    -------------
     go_ax (BuiltInFamRewrite  bif) cos = go_bif (bifrw_proves bif)  cos
     go_ax (BuiltInFamInteract bif) cos = go_bif (bifint_proves bif) cos
     go_ax (UnbranchedAxiom ax)     cos = go_branch ax (coAxiomSingleBranch ax) cos
     go_ax (BranchedAxiom ax i)     cos = go_branch ax (coAxiomNthBranch ax i)  cos
 
-    go_bif proves cos = pFst $ expectJust "coAxRuleKind" $ proves $
-                        map coercionKind cos
+    -------------
+    go_bif proves cos = case proves (map coercionKind cos) of
+                          Nothing -> pprPanic "coercionKind" (ppr cos)
+                          Just (Pair lty rty) -> pickLR which (lty, rty)
 
+    -------------
     go_branch :: CoAxiom br -> CoAxBranch -> [Coercion] -> Type
-    go_branch ax (CoAxBranch { cab_tvs = tvs, cab_cvs = cvs, cab_lhs = lhs_tys }) cos
+    go_branch ax (CoAxBranch { cab_tvs = tvs, cab_cvs = cvs
+                             , cab_lhs = lhs_tys, cab_rhs = rhs_ty }) cos
       = assert (cos `equalLength` tcvs) $
                   -- Invariant of AxiomRuleCo: cos should
                   -- exactly saturate the axiom branch
-        substTy (zipTCvSubst tcvs ltys) (mkTyConApp tc lhs_tys)
+        let (tys1, cotys1) = splitAtList tvs tys
+            cos1           = map stripCoercionTy cotys1
+        in
+-- You might think to use
+--        substTy (zipTCvSubst tcvs ltys) (mkTyConApp tc lhs_tys)
+-- but #25066 makes it much less efficient than the silly calls below
+        substTyWith tvs tys1       $
+        substTyWithCoVars cvs cos1 $
+        pickLR which (mkTyConApp tc lhs_tys, rhs_ty)
      where
        tc   = coAxiomTyCon ax
        tcvs | null cvs  = tvs  -- Very common case (currently always!)
             | otherwise = tvs ++ cvs
-       ltys = map go cos  -- `go` is `coercionLKind`
+       tys = map go cos
 
-coercionRKind :: HasDebugCallStack => Coercion -> Type
-coercionRKind co
-  = go co
-  where
-    go (Refl ty)                 = ty
-    go (GRefl _ ty MRefl)        = ty
-    go (GRefl _ ty (MCo co1))    = mkCastTy ty co1
-    go (TyConAppCo _ tc cos)     = mkTyConApp tc (map go cos)
-    go (AppCo co1 co2)           = mkAppTy (go co1) (go co2)
-    go (CoVarCo cv)              = coVarRType cv
-    go (HoleCo h)                = coVarRType (coHoleCoVar h)
-    go (FunCo { fco_afr = af, fco_mult = mult, fco_arg = arg, fco_res = res})
-       {- See Note [FunCo] -}    = FunTy { ft_af = af, ft_mult = go mult
-                                         , ft_arg = go arg, ft_res = go res }
-    go (UnivCo { uco_rty = ty2 })= ty2
-    go (SymCo co)                = coercionLKind co
-    go (TransCo _ co2)           = go co2
-    go (LRCo lr co)              = pickLR lr (splitAppTy (go co))
-    go (InstCo aco arg)          = go_app aco [go arg]
-    go (KindCo co)               = typeKind (go co)
-    go (SubCo co)                = go co
-    go (SelCo d co)              = selectFromType d (go co)
-    go (AxiomRuleCo ax cos)      = go_ax ax cos
-
-    go co@(ForAllCo { fco_tcv = tv1, fco_visR = visR
-                    , fco_kind = k_co, fco_body = co1 }) -- works for both tyvar and covar
-       | isGReflCo k_co           = mkTyCoForAllTy tv1 visR (go co1)
-         -- kind_co always has kind @Type@, thus @isGReflCo@
-       | otherwise                = go_forall empty_subst co
-       where
-         empty_subst = mkEmptySubst (mkInScopeSet $ tyCoVarsOfCo co)
-
-    go_app :: Coercion -> [Type] -> Type
-    -- Collect up all the arguments and apply all at once
-    -- See Note [Nested InstCos]
-    go_app (InstCo co arg) args = go_app co (go arg:args)
-    go_app co              args = piResultTys (go co) args
-
-    go_forall subst (ForAllCo { fco_tcv = tv1, fco_visR = visR
-                              , fco_kind = k_co, fco_body = co })
+    -------------
+    go_forall_right subst (ForAllCo { fco_tcv = tv1, fco_visR = visR
+                                    , fco_kind = k_co, fco_body = co })
       -- See Note [Nested ForAllCos]
       | isTyVar tv1
-      = mkForAllTy (Bndr tv2 visR) (go_forall subst' co)
+      = mkForAllTy (Bndr tv2 visR) (go_forall_right subst' co)
       where
         k2  = coercionRKind k_co
         tv2 = setTyVarKind tv1 (substTy subst k2)
@@ -2546,10 +2536,10 @@ coercionRKind co
                | otherwise      = extendTvSubst (extendSubstInScope subst tv2) tv1 $
                                   TyVarTy tv2 `mkCastTy` mkSymCo k_co
 
-    go_forall subst (ForAllCo { fco_tcv = cv1, fco_visR = visR
-                              , fco_kind = k_co, fco_body = co })
+    go_forall_right subst (ForAllCo { fco_tcv = cv1, fco_visR = visR
+                                    , fco_kind = k_co, fco_body = co })
       | isCoVar cv1
-      = mkTyCoForAllTy cv2 visR (go_forall subst' co)
+      = mkTyCoForAllTy cv2 visR (go_forall_right subst' co)
       where
         k2    = coercionRKind k_co
         r     = coVarRole cv1
@@ -2572,30 +2562,10 @@ coercionRKind co
                 | otherwise     = extendCvSubst (extendSubstInScope subst cv2)
                                                 cv1 n_subst
 
-    go_forall subst other_co
+    go_forall_right subst other_co
       -- when other_co is not a ForAllCo
       = substTy subst (go other_co)
 
-    -- Tiresome to near-duplicate this, but coercionKind
-    -- is a very hot cod path
-    go_ax (BuiltInFamRewrite  bif) cos = go_bif (bifrw_proves bif)  cos
-    go_ax (BuiltInFamInteract bif) cos = go_bif (bifint_proves bif) cos
-    go_ax (UnbranchedAxiom ax)     cos = go_branch (coAxiomSingleBranch ax) cos
-    go_ax (BranchedAxiom ax i)     cos = go_branch (coAxiomNthBranch ax i)  cos
-
-    go_bif proves cos = pSnd $ expectJust "coAxRuleKind" $ proves $
-                        map coercionKind cos
-
-    go_branch :: CoAxBranch -> [Coercion] -> Type
-    go_branch (CoAxBranch { cab_tvs = tvs, cab_cvs = cvs, cab_rhs = rhs_ty }) cos
-      = assert (cos `equalLength` tcvs) $
-                  -- Invariant of AxiomRuleCo: cos should
-                  -- exactly saturate the axiom branch
-        substTy (zipTCvSubst tcvs rtys) rhs_ty
-     where
-       tcvs | null cvs  = tvs  -- Very common case (currently always!)
-            | otherwise = tvs ++ cvs
-       rtys = map go cos  -- `go` is `coercionRKind`
 {-
 
 Note [Nested ForAllCos]

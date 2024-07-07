@@ -60,7 +60,7 @@ import {-# SOURCE #-} GHC.Core.Coercion
    , mkAxiomRuleCo, mkAppCo, mkGReflCo
    , mkInstCo, mkLRCo, mkTyConAppCo
    , mkCoercionType
-   , coercionKind, coercionLKind, coVarKindsTypesRole )
+   , coercionKind, coercionLKind, coVarTypesRole )
 import {-# SOURCE #-} GHC.Core.TyCo.Ppr ( pprTyVar )
 import {-# SOURCE #-} GHC.Core.Ppr ( ) -- instance Outputable CoreExpr
 import {-# SOURCE #-} GHC.Core ( CoreExpr )
@@ -1086,7 +1086,7 @@ substCoVarBndrUsing subst_fn subst@(Subst in_scope idenv tenv cenv) old_var
     new_var = uniqAway in_scope subst_old_var
     subst_old_var = mkCoVar (varName old_var) new_var_type
 
-    (_, _, t1, t2, role) = coVarKindsTypesRole old_var
+    (t1, t2, role) = coVarTypesRole old_var
     t1' = subst_fn subst t1
     t2' = subst_fn subst t2
     new_var_type = mkCoercionType role t1' t2'

@@ -41,7 +41,7 @@ isGReflCo :: Coercion -> Bool
 isReflCo :: Coercion -> Bool
 isReflexiveCo :: Coercion -> Bool
 decomposePiCos :: HasDebugCallStack => Coercion -> Pair Type -> [Type] -> ([Coercion], Coercion)
-coVarKindsTypesRole :: HasDebugCallStack => CoVar -> (Kind, Kind, Type, Type, Role)
+coVarTypesRole :: HasDebugCallStack => CoVar -> (Type, Type, Role)
 coVarRole :: CoVar -> Role
 
 mkCoercionType :: Role -> Type -> Type -> Type
