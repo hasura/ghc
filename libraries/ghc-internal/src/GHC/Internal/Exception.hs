@@ -81,7 +81,8 @@ import GHC.Internal.Exception.Type
 throw :: forall (r :: RuntimeRep). forall (a :: TYPE r). forall e.
          (HasCallStack, Exception e) => e -> a
 throw e =
-    let !se = unsafePerformIO (toExceptionWithBacktrace e)
+    let se = unsafePerformIO (toExceptionWithBacktrace e)
+        -- No bang!  ToDo: document this (see #25066)
     in raise# se
 
 -- | @since base-4.20.0.0
