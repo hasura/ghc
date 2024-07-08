@@ -2449,24 +2449,27 @@ coercion_lr_kind :: HasDebugCallStack => LeftOrRight -> Coercion -> Type
 coercion_lr_kind which co
   = go co
   where
-    go (Refl ty)                 = ty
-    go (GRefl _ ty _)            = ty
-    go (TyConAppCo _ tc cos)     = mkTyConApp tc (map go cos)
-    go (AppCo co1 co2)           = mkAppTy (go co1) (go co2)
+    go (Refl ty)              = ty
+    go (GRefl _ ty MRefl)     = ty
+    go (GRefl _ ty (MCo co1)) = pickLR which (ty, mkCastTy ty co1)
+    go (TyConAppCo _ tc cos)  = mkTyConApp tc (map go cos)
+    go (AppCo co1 co2)        = mkAppTy (go co1) (go co2)
+    go (CoVarCo cv)           = go_covar cv
+    go (HoleCo h)             = go_covar (coHoleCoVar h)
+    go (SymCo co)             = pickLR which (coercionRKind co, coercionLKind co)
+    go (TransCo co1 co2)      = pickLR which (go co1,           go co2)
+    go (LRCo lr co)           = pickLR lr (splitAppTy (go co))
+    go (InstCo aco arg)       = go_app aco [go arg]
+    go (KindCo co)            = typeKind (go co)
+    go (SubCo co)             = go co
+    go (SelCo d co)           = selectFromType d (go co)
+    go (AxiomRuleCo ax cos)   = go_ax ax cos
+
+    go (UnivCo { uco_lty = lty, uco_rty = rty})
+      = pickLR which (lty, rty)
     go (FunCo { fco_afl = af, fco_mult = mult, fco_arg = arg, fco_res = res})
-       {- See Note [FunCo] -}    = FunTy { ft_af = af, ft_mult = go mult
-                                         , ft_arg = go arg, ft_res = go res }
-    go (CoVarCo cv)              = go_covar cv
-    go (HoleCo h)                = go_covar (coHoleCoVar h)
-    go (UnivCo { uco_lty = ty1}) = ty1
-    go (SymCo co)                = pickLR which (coercionRKind co, coercionLKind co)
-    go (TransCo co1 _)           = go co1
-    go (LRCo lr co)              = pickLR lr (splitAppTy (go co))
-    go (InstCo aco arg)          = go_app aco [go arg]
-    go (KindCo co)               = typeKind (go co)
-    go (SubCo co)                = go co
-    go (SelCo d co)              = selectFromType d (go co)
-    go (AxiomRuleCo ax cos)      = go_ax ax cos
+      = -- See Note [FunCo]
+        FunTy { ft_af = af, ft_mult = go mult, ft_arg = go arg, ft_res = go res }
 
     go co@(ForAllCo { fco_tcv = tv1, fco_visL = visL, fco_visR = visR
                     , fco_kind = k_co, fco_body = co1 })
@@ -2510,9 +2513,9 @@ coercion_lr_kind which co
         let (tys1, cotys1) = splitAtList tvs tys
             cos1           = map stripCoercionTy cotys1
         in
--- You might think to use
---        substTy (zipTCvSubst tcvs ltys) (mkTyConApp tc lhs_tys)
--- but #25066 makes it much less efficient than the silly calls below
+        -- You might think to use
+        --        substTy (zipTCvSubst tcvs ltys) (pickLR ...)
+        -- but #25066 makes it much less efficient than the silly calls below
         substTyWith tvs tys1       $
         substTyWithCoVars cvs cos1 $
         pickLR which (mkTyConApp tc lhs_tys, rhs_ty)
