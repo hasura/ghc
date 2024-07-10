@@ -546,7 +546,7 @@ cmmNativeGen logger ncgImpl us fileIds dbgMap cmm count
                         (vcat   $ map (\(stage, stats)
                                         -> text "# --------------------------"
                                         $$ text "#  cmm " <> int count <> text " Stage " <> int stage
-                                        $$ ppr (fmap (pprInstr platform) stats))
+                                        $$ ppr (fmap (pprInstrS platform) stats))
                                 $ zip [0..] regAllocStats)
 
                 let mPprStats =

@@ -10,6 +10,7 @@ module GHC.Platform.Reg (
         realRegSingle,
         isRealReg,      takeRealReg,
         isVirtualReg,   takeVirtualReg,
+        pprPlatformReg,
 
         VirtualReg(..),
         renameVirtualReg,
@@ -89,16 +90,18 @@ instance Uniquable VirtualReg where
                 VirtualRegD u   -> u
 
 instance Outputable VirtualReg where
-        ppr reg
-         = case reg of
-                VirtualRegI  u  -> text "%vI_"   <> pprUniqueAlways u
-                VirtualRegHi u  -> text "%vHi_"  <> pprUniqueAlways u
-                -- this code is kinda wrong on x86
-                -- because float and double occupy the same register set
-                -- namely SSE2 register xmm0 .. xmm15
-                VirtualRegF  u  -> text "%vFloat_"   <> pprUniqueAlways u
-                VirtualRegD  u  -> text "%vDouble_"   <> pprUniqueAlways u
+  ppr = pprVirtualReg
 
+pprVirtualReg :: IsLine doc => VirtualReg -> doc
+pprVirtualReg reg
+ = case reg of
+        VirtualRegI  u  -> text "%vI_"   <> pprUniqueAlways u
+        VirtualRegHi u  -> text "%vHi_"  <> pprUniqueAlways u
+        -- this code is kinda wrong on x86
+        -- because float and double occupy the same register set
+        -- namely SSE2 register xmm0 .. xmm15
+        VirtualRegF  u  -> text "%vFloat_"   <> pprUniqueAlways u
+        VirtualRegD  u  -> text "%vDouble_"   <> pprUniqueAlways u
 
 
 renameVirtualReg :: Unique -> VirtualReg -> VirtualReg
@@ -152,9 +155,11 @@ instance Uniquable RealReg where
                 RealRegSingle i         -> mkRegSingleUnique i
 
 instance Outputable RealReg where
-        ppr reg
-         = case reg of
-                RealRegSingle i         -> text "%r"  <> int i
+        ppr = pprRealReg
+
+pprRealReg :: IsLine doc => RealReg -> doc
+pprRealReg reg = case reg of
+  RealRegSingle i -> text "%r"  <> int i
 
 regNosOfRealReg :: RealReg -> [RegNo]
 regNosOfRealReg rr
@@ -193,15 +198,20 @@ instance Uniquable Reg where
                 RegVirtual vr   -> getUnique vr
                 RegReal    rr   -> getUnique rr
 
+-- | 'pprPlatformReg' specialised to SDoc
+instance Outputable Reg where
+  ppr = pprPlatformReg
+
 -- | Print a reg in a generic manner
 --      If you want the architecture specific names, then use the pprReg
 --      function from the appropriate Ppr module.
-instance Outputable Reg where
-        ppr reg
-         = case reg of
-                RegVirtual vr   -> ppr vr
-                RegReal    rr   -> ppr rr
-
+pprPlatformReg :: IsLine doc => Reg -> doc
+pprPlatformReg reg
+ = case reg of
+        RegVirtual vr   -> pprVirtualReg vr
+        RegReal    rr   -> pprRealReg rr
+{-# SPECIALIZE pprPlatformReg :: Reg -> SDoc #-}
+{-# SPECIALIZE pprPlatformReg :: Reg -> HLine #-}
 
 isRealReg :: Reg -> Bool
 isRealReg reg
