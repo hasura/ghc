@@ -1,3 +1,4 @@
+{-# LANGUAGE Safe #-}
 -- |
 --
 -- Module      :  System.Posix.Types
