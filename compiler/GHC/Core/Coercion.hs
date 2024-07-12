@@ -2468,9 +2468,11 @@ coercion_lr_kind which orig_co
 
     go (UnivCo { uco_lty = lty, uco_rty = rty})
       = pickLR which (lty, rty)
-    go (FunCo { fco_afl = af, fco_mult = mult, fco_arg = arg, fco_res = res})
+    go (FunCo { fco_afl = afl, fco_afr = afr, fco_mult = mult
+              , fco_arg = arg, fco_res = res})
       = -- See Note [FunCo]
-        FunTy { ft_af = af, ft_mult = go mult, ft_arg = go arg, ft_res = go res }
+        FunTy { ft_af = pickLR which (afl, afr), ft_mult = go mult
+              , ft_arg = go arg, ft_res = go res }
 
     go co@(ForAllCo { fco_tcv = tv1, fco_visL = visL, fco_visR = visR
                     , fco_kind = k_co, fco_body = co1 })
