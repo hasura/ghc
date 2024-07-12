@@ -394,9 +394,10 @@ orphNamesOfCo (FunCo { fco_mult = co_mult, fco_arg = co1, fco_res = co2 })
                                       `unionNameSet` orphNamesOfCo co1
                                       `unionNameSet` orphNamesOfCo co2
 orphNamesOfCo (CoVarCo _)           = emptyNameSet
-orphNamesOfCo (AxiomRuleCo con cos) = orphNamesOfAxRule con `unionNameSet` orphNamesOfCos cos
-orphNamesOfCo (UnivCo { uco_lty = t1, uco_rty = t2 })
+orphNamesOfCo (AxiomCo con cos)     = orphNamesOfAxRule con `unionNameSet` orphNamesOfCos cos
+orphNamesOfCo (UnivCo { uco_lty = t1, uco_rty = t2, uco_deps = cos })
                                     = orphNamesOfType t1 `unionNameSet` orphNamesOfType t2
+                                      `unionNameSet` orphNamesOfCos cos
 orphNamesOfCo (SymCo co)            = orphNamesOfCo co
 orphNamesOfCo (TransCo co1 co2)     = orphNamesOfCo co1 `unionNameSet` orphNamesOfCo co2
 orphNamesOfCo (SelCo _ co)          = orphNamesOfCo co
@@ -410,8 +411,8 @@ orphNamesOfCos :: [Coercion] -> NameSet
 orphNamesOfCos = orphNamesOfThings orphNamesOfCo
 
 orphNamesOfAxRule :: CoAxiomRule -> NameSet
-orphNamesOfAxRule (BuiltInFamRewrite {})  = emptyNameSet
-orphNamesOfAxRule (BuiltInFamInteract {}) = emptyNameSet
+orphNamesOfAxRule (BuiltInFamRewrite bif) = unitNameSet (tyConName (bifrw_fam_tc bif))
+orphNamesOfAxRule (BuiltInFamInteract {}) = emptyNameSet  -- A free-floating axiom
 orphNamesOfAxRule (UnbranchedAxiom ax)    = orphNamesOfCoAx ax
 orphNamesOfAxRule (BranchedAxiom ax _)    = orphNamesOfCoAx ax
 

@@ -274,7 +274,7 @@ import GHC.Core.Coercion.Axiom
 import {-# SOURCE #-} GHC.Core.Coercion
    ( mkNomReflCo, mkGReflCo, mkReflCo
    , mkTyConAppCo, mkAppCo
-   , mkForAllCo, mkFunCo2, mkAxiomRuleCo, mkUnivCo
+   , mkForAllCo, mkFunCo2, mkAxiomCo, mkUnivCo
    , mkSymCo, mkTransCo, mkSelCo, mkLRCo, mkInstCo
    , mkKindCo, mkSubCo, mkFunCo, funRole
    , decomposePiCos, coercionKind
@@ -556,8 +556,8 @@ expandTypeSynonyms ty
       = mkFunCo2 r afl afr (go_co subst w) (go_co subst co1) (go_co subst co2)
     go_co subst (CoVarCo cv)
       = substCoVar subst cv
-    go_co subst (AxiomRuleCo ax cs)
-      = mkAxiomRuleCo ax (map (go_co subst) cs)
+    go_co subst (AxiomCo ax cs)
+      = mkAxiomCo ax (map (go_co subst) cs)
     go_co subst co@(UnivCo { uco_lty = lty, uco_rty = rty })
       = co { uco_lty = go subst lty, uco_rty = go subst rty }
     go_co subst (SymCo co)
@@ -974,7 +974,7 @@ mapTyCoX (TyCoMapper { tcm_tyvar = tyvar
                                                      <*> go_ty env t1 <*> go_ty env t2
     go_co !env (SymCo co)                 = mkSymCo <$> go_co env co
     go_co !env (TransCo c1 c2)            = mkTransCo <$> go_co env c1 <*> go_co env c2
-    go_co !env (AxiomRuleCo r cos)        = mkAxiomRuleCo r <$> go_cos env cos
+    go_co !env (AxiomCo r cos)            = mkAxiomCo r <$> go_cos env cos
     go_co !env (SelCo i co)               = mkSelCo i <$> go_co env co
     go_co !env (LRCo lr co)               = mkLRCo lr <$> go_co env co
     go_co !env (InstCo co arg)            = mkInstCo <$> go_co env co <*> go_co env arg

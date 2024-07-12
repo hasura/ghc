@@ -33,7 +33,7 @@ mkNomReflCo :: Type -> Coercion
 mkKindCo :: Coercion -> Coercion
 mkSubCo :: HasDebugCallStack => Coercion -> Coercion
 mkProofIrrelCo :: Role -> Coercion -> Coercion -> Coercion -> Coercion
-mkAxiomRuleCo :: CoAxiomRule -> [Coercion] -> Coercion
+mkAxiomCo :: CoAxiomRule -> [Coercion] -> Coercion
 
 funRole :: Role -> FunSel -> Role
 

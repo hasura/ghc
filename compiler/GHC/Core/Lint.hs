@@ -2611,18 +2611,21 @@ lintCoercion (InstCo co arg)
 
          ; _ -> failWithL (text "Bad argument of inst") }}}
 
-lintCoercion this_co@(AxiomRuleCo ax cos)
+lintCoercion this_co@(AxiomCo ax cos)
   = do { cos' <- mapM lintCoercion cos
        ; let arg_kinds :: [Pair Type] = map coercionKind cos'
        ; lint_roles 0 (coAxiomRuleArgRoles ax) cos'
        ; lint_ax ax arg_kinds
-       ; return (AxiomRuleCo ax cos') }
+       ; return (AxiomCo ax cos') }
   where
     lint_ax :: CoAxiomRule -> [Pair Type] -> LintM ()
     lint_ax (BuiltInFamRewrite  bif) prs
       = checkL (isJust (bifrw_proves bif prs))  bad_bif
     lint_ax (BuiltInFamInteract bif) prs
-      = checkL (isJust (bifint_proves bif prs)) bad_bif
+      = checkL (case prs of
+                  [pr] -> isJust (bifint_proves bif pr)
+                  _    -> False)
+               bad_bif
     lint_ax (UnbranchedAxiom ax) prs
       = lintBranch this_co (coAxiomTyCon ax) (coAxiomSingleBranch ax) prs
     lint_ax (BranchedAxiom ax ind) prs

@@ -62,7 +62,7 @@ import GHC.Builtin.Types.Prim( funTyFlagTyCon )
 import Data.Monoid as DM ( Any(..) )
 import GHC.Core.TyCo.Rep
 import GHC.Core.TyCon
-import GHC.Core.Coercion.Axiom( CoAxiomRule(..), coAxiomTyCon )
+import GHC.Core.Coercion.Axiom( CoAxiomRule(..), BuiltInFamRewrite(..), coAxiomTyCon )
 import GHC.Utils.FV
 
 import GHC.Types.Var
@@ -668,7 +668,7 @@ tyCoFVsOfCo (CoVarCo v) fv_cand in_scope acc
 tyCoFVsOfCo (HoleCo h) fv_cand in_scope acc
   = tyCoFVsOfCoVar (coHoleCoVar h) fv_cand in_scope acc
     -- See Note [CoercionHoles and coercion free variables]
-tyCoFVsOfCo (AxiomRuleCo _ cs)    fv_cand in_scope acc = tyCoFVsOfCos cs  fv_cand in_scope acc
+tyCoFVsOfCo (AxiomCo _ cs)    fv_cand in_scope acc = tyCoFVsOfCos cs  fv_cand in_scope acc
 tyCoFVsOfCo (UnivCo { uco_lty = t1, uco_rty = t2, uco_deps = deps}) fv_cand in_scope acc
   = (tyCoFVsOfCos deps `unionFV` tyCoFVsOfType t1
                       `unionFV` tyCoFVsOfType t2) fv_cand in_scope acc
@@ -716,7 +716,7 @@ almost_devoid_co_var_of_co (FunCo { fco_mult = w, fco_arg = co1, fco_res = co2 }
   && almost_devoid_co_var_of_co co2 cv
 almost_devoid_co_var_of_co (CoVarCo v) cv = v /= cv
 almost_devoid_co_var_of_co (HoleCo h)  cv = (coHoleCoVar h) /= cv
-almost_devoid_co_var_of_co (AxiomRuleCo _ cs) cv
+almost_devoid_co_var_of_co (AxiomCo _ cs) cv
   = almost_devoid_co_var_of_cos cs cv
 almost_devoid_co_var_of_co (UnivCo { uco_lty = t1, uco_rty = t2, uco_deps = deps }) cv
   =  almost_devoid_co_var_of_cos deps cv
@@ -1126,8 +1126,9 @@ tyConsOfType ty
                                    = go_co kind_co `unionUniqSets` go_co co
      go_co (FunCo { fco_mult = m, fco_arg = a, fco_res = r })
                                    = go_co m `unionUniqSets` go_co a `unionUniqSets` go_co r
-     go_co (AxiomRuleCo ax args)   = go_ax ax `unionUniqSets` go_cos args
-     go_co (UnivCo { uco_lty = t1, uco_rty = t2 }) = go t1 `unionUniqSets` go t2
+     go_co (AxiomCo ax args)       = go_ax ax `unionUniqSets` go_cos args
+     go_co (UnivCo { uco_lty = t1, uco_rty = t2, uco_deps = cos })
+                                   = go t1 `unionUniqSets` go t2 `unionUniqSets` go_cos cos
      go_co (CoVarCo {})            = emptyUniqSet
      go_co (HoleCo {})             = emptyUniqSet
      go_co (SymCo co)              = go_co co
@@ -1145,10 +1146,10 @@ tyConsOfType ty
 
      go_tc tc = unitUniqSet tc
 
-     go_ax (UnbranchedAxiom ax)    = go_tc $ coAxiomTyCon ax
-     go_ax (BranchedAxiom ax _)    = go_tc $ coAxiomTyCon ax
-     go_ax (BuiltInFamRewrite  {}) = emptyUniqSet
-     go_ax (BuiltInFamInteract {}) = emptyUniqSet
+     go_ax (UnbranchedAxiom ax)     = go_tc $ coAxiomTyCon ax
+     go_ax (BranchedAxiom ax _)     = go_tc $ coAxiomTyCon ax
+     go_ax (BuiltInFamRewrite  bif) = go_tc $ bifrw_fam_tc bif
+     go_ax (BuiltInFamInteract {})  = emptyUniqSet  -- A free-floating axiom
 
 tyConsOfTypes :: [Type] -> UniqSet TyCon
 tyConsOfTypes tys = foldr (unionUniqSets . tyConsOfType) emptyUniqSet tys
@@ -1303,35 +1304,6 @@ occCheckExpand vs_to_avoid ty
     go_co cxt (AppCo co arg)            = do { co' <- go_co cxt co
                                              ; arg' <- go_co cxt arg
                                              ; return (AppCo co' arg') }
-    go_co cxt@(as, env) co@(ForAllCo { fco_tcv = tv, fco_kind = kind_co, fco_body = body_co })
-      = do { kind_co' <- go_co cxt kind_co
-           ; let tv' = setVarType tv $
-                       coercionLKind kind_co'
-                 env' = extendVarEnv env tv tv'
-                 as'  = as `delVarSet` tv
-           ; body' <- go_co (as', env') body_co
-           ; return (co { fco_tcv = tv', fco_kind = kind_co', fco_body = body' }) }
-    go_co cxt co@(FunCo { fco_mult = w, fco_arg = co1 ,fco_res = co2 })
-      = do { co1' <- go_co cxt co1
-           ; co2' <- go_co cxt co2
-           ; w' <- go_co cxt w
-           ; return (co { fco_mult = w', fco_arg = co1', fco_res = co2' })}
-
-    go_co (as,env) co@(CoVarCo c)
-      | Just c' <- lookupVarEnv env c   = return (CoVarCo c')
-      | bad_var_occ as c                = Nothing
-      | otherwise                       = return co
-
-    go_co (as,_) co@(HoleCo h)
-      | bad_var_occ as (ch_co_var h)    = Nothing
-      | otherwise                       = return co
-
-    go_co cxt (AxiomRuleCo ax cs)       = do { cs' <- mapM (go_co cxt) cs
-                                             ; return (AxiomRuleCo ax cs') }
-    go_co cxt co@(UnivCo { uco_lty = ty1, uco_rty = ty2 })
-                                        = do { ty1' <- go cxt ty1
-                                             ; ty2' <- go cxt ty2
-                                             ; return (co { uco_lty = ty1', uco_rty = ty2' }) }
     go_co cxt (SymCo co)                = do { co' <- go_co cxt co
                                              ; return (SymCo co') }
     go_co cxt (TransCo co1 co2)         = do { co1' <- go_co cxt co1
@@ -1348,4 +1320,36 @@ occCheckExpand vs_to_avoid ty
                                              ; return (KindCo co') }
     go_co cxt (SubCo co)                = do { co' <- go_co cxt co
                                              ; return (SubCo co') }
+
+    go_co cxt@(as, env) co@(ForAllCo { fco_tcv = tv, fco_kind = kind_co, fco_body = body_co })
+      = do { kind_co' <- go_co cxt kind_co
+           ; let tv' = setVarType tv $
+                       coercionLKind kind_co'
+                 env' = extendVarEnv env tv tv'
+                 as'  = as `delVarSet` tv
+           ; body' <- go_co (as', env') body_co
+           ; return (co { fco_tcv = tv', fco_kind = kind_co', fco_body = body' }) }
+
+    go_co cxt co@(FunCo { fco_mult = w, fco_arg = co1 ,fco_res = co2 })
+      = do { co1' <- go_co cxt co1
+           ; co2' <- go_co cxt co2
+           ; w' <- go_co cxt w
+           ; return (co { fco_mult = w', fco_arg = co1', fco_res = co2' })}
+
+    go_co (as,env) co@(CoVarCo c)
+      | Just c' <- lookupVarEnv env c   = return (CoVarCo c')
+      | bad_var_occ as c                = Nothing
+      | otherwise                       = return co
+
+    go_co (as,_) co@(HoleCo h)
+      | bad_var_occ as (ch_co_var h)    = Nothing
+      | otherwise                       = return co
+
+    go_co cxt (AxiomCo ax cs)           = do { cs' <- mapM (go_co cxt) cs
+                                             ; return (AxiomCo ax cs') }
+    go_co cxt co@(UnivCo { uco_lty = ty1, uco_rty = ty2, uco_deps = cos })
+      = do { ty1' <- go cxt ty1
+           ; ty2' <- go cxt ty2
+           ; cos' <- mapM (go_co cxt) cos
+           ; return (co { uco_lty = ty1', uco_rty = ty2', uco_deps = cos' }) }
 

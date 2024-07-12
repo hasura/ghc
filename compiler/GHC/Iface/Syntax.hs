@@ -1781,10 +1781,8 @@ freeNamesIfCoercion (IfaceForAllCo _tcv _visL _visR kind_co co)
 freeNamesIfCoercion (IfaceFreeCoVar _) = emptyNameSet
 freeNamesIfCoercion (IfaceCoVarCo _)   = emptyNameSet
 freeNamesIfCoercion (IfaceHoleCo _)    = emptyNameSet
-freeNamesIfCoercion (IfaceUnivCo _ _ t1 t2 _)
-  = freeNamesIfType t1 &&& freeNamesIfType t2
-    -- Ignoring uco_deps field, which are all local,
-    -- and don't contribute to dependency analysis
+freeNamesIfCoercion (IfaceUnivCo _ _ t1 t2 cos)
+  = freeNamesIfType t1 &&& freeNamesIfType t2 &&& fnList freeNamesIfCoercion cos
 freeNamesIfCoercion (IfaceSymCo c)
   = freeNamesIfCoercion c
 freeNamesIfCoercion (IfaceTransCo c1 c2)
@@ -1799,7 +1797,7 @@ freeNamesIfCoercion (IfaceKindCo c)
   = freeNamesIfCoercion c
 freeNamesIfCoercion (IfaceSubCo co)
   = freeNamesIfCoercion co
-freeNamesIfCoercion (IfaceAxiomRuleCo ax cos)
+freeNamesIfCoercion (IfaceAxiomCo ax cos)
   = fnAxRule ax &&& fnList freeNamesIfCoercion cos
 
 fnAxRule :: IfaceAxiomRule -> NameSet

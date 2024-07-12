@@ -675,15 +675,13 @@ rnIfaceCo (IfaceInstCo c1 c2)           = IfaceInstCo <$> rnIfaceCo c1 <*> rnIfa
 rnIfaceCo (IfaceSelCo d c)              = IfaceSelCo d <$> rnIfaceCo c
 rnIfaceCo (IfaceLRCo lr c)              = IfaceLRCo lr <$> rnIfaceCo c
 rnIfaceCo (IfaceSubCo c)                = IfaceSubCo <$> rnIfaceCo c
-rnIfaceCo (IfaceAxiomRuleCo ax cos)     = IfaceAxiomRuleCo ax <$> mapM rnIfaceCo cos
+rnIfaceCo (IfaceAxiomCo ax cos)         = IfaceAxiomCo ax <$> mapM rnIfaceCo cos
 rnIfaceCo (IfaceKindCo c)               = IfaceKindCo <$> rnIfaceCo c
 rnIfaceCo (IfaceForAllCo bndr visL visR co1 co2)
     = (\bndr' co1' co2' -> IfaceForAllCo bndr' visL visR co1' co2')
       <$> rnIfaceBndr bndr <*> rnIfaceCo co1 <*> rnIfaceCo co2
 rnIfaceCo (IfaceUnivCo s r t1 t2 deps)
     = IfaceUnivCo s r <$> rnIfaceType t1 <*> rnIfaceType t2 <*> mapM rnIfaceCo deps
-        -- Renaming affects only type constructors, not coercion variables,
-        -- so no need to recurse into the free-var fields
 
 rnIfaceTyCon :: Rename IfaceTyCon
 rnIfaceTyCon (IfaceTyCon n info)

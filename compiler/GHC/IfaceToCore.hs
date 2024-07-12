@@ -1485,8 +1485,8 @@ tcIfaceCo = go
     go (IfaceLRCo lr c)          = LRCo lr  <$> go c
     go (IfaceKindCo c)           = KindCo   <$> go c
     go (IfaceSubCo c)            = SubCo    <$> go c
-    go (IfaceAxiomRuleCo ax cos) = AxiomRuleCo <$> tcIfaceCoAxiomRule ax
-                                               <*> mapM go cos
+    go (IfaceAxiomCo ax cos)     = AxiomCo <$> tcIfaceAxiomRule ax
+                                           <*> mapM go cos
     go (IfaceFreeCoVar c)        = pprPanic "tcIfaceCo:IfaceFreeCoVar" (ppr c)
     go (IfaceHoleCo c)           = pprPanic "tcIfaceCo:IfaceHoleCo"    (ppr c)
 
@@ -2020,18 +2020,18 @@ tcIfaceTyCon (IfaceTyCon name _info)
               AConLike (RealDataCon dc) -> return (promoteDataCon dc)
               _ -> pprPanic "tcIfaceTyCon" (ppr thing) }
 
-tcIfaceCoAxiomRule :: IfaceAxiomRule -> IfL CoAxiomRule
+tcIfaceAxiomRule :: IfaceAxiomRule -> IfL CoAxiomRule
 -- Unlike CoAxioms, which arise from user 'type instance' declarations,
 -- there are a fixed set of CoAxiomRules:
 --   - axioms for type-level literals (Nat and Symbol),
 --     enumerated in typeNatCoAxiomRules
-tcIfaceCoAxiomRule (IfaceAR_X n)
+tcIfaceAxiomRule (IfaceAR_X n)
   | Just axr <- lookupUFM typeNatCoAxiomRules (ifLclNameFS n)
   = return axr
   | otherwise
-  = pprPanic "tcIfaceCoAxiomRule" (ppr n)
-tcIfaceCoAxiomRule (IfaceAR_U name)   = do { ax <- tcIfaceUnbranchedAxiom name; return (UnbranchedAxiom ax) }
-tcIfaceCoAxiomRule (IfaceAR_B name i) = do { ax <- tcIfaceBranchedAxiom name;   return (BranchedAxiom ax i) }
+  = pprPanic "tcIfaceAxiomRule" (ppr n)
+tcIfaceAxiomRule (IfaceAR_U name)   = do { ax <- tcIfaceUnbranchedAxiom name; return (UnbranchedAxiom ax) }
+tcIfaceAxiomRule (IfaceAR_B name i) = do { ax <- tcIfaceBranchedAxiom name;   return (BranchedAxiom ax i) }
 
 tcIfaceUnbranchedAxiom :: IfExtName -> IfL (CoAxiom Unbranched)
 tcIfaceUnbranchedAxiom name

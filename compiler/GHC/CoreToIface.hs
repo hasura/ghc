@@ -284,19 +284,19 @@ toIfaceCoercionX fr co
     go (GRefl r ty mco)     = IfaceGReflCo r (toIfaceTypeX fr ty) (go_mco mco)
     go (CoVarCo cv)
       -- See Note [Free TyVars and CoVars in IfaceType] in GHC.Iface.Type
-      | cv `elemVarSet` fr  = IfaceFreeCoVar cv
-      | otherwise           = IfaceCoVarCo (toIfaceCoVar cv)
-    go (HoleCo h)           = IfaceHoleCo  (coHoleCoVar h)
+      | cv `elemVarSet` fr = IfaceFreeCoVar cv
+      | otherwise          = IfaceCoVarCo (toIfaceCoVar cv)
+    go (HoleCo h)          = IfaceHoleCo  (coHoleCoVar h)
 
-    go (AppCo co1 co2)      = IfaceAppCo  (go co1) (go co2)
-    go (SymCo co)           = IfaceSymCo (go co)
-    go (TransCo co1 co2)    = IfaceTransCo (go co1) (go co2)
-    go (SelCo d co)         = IfaceSelCo d (go co)
-    go (LRCo lr co)         = IfaceLRCo lr (go co)
-    go (InstCo co arg)      = IfaceInstCo (go co) (go arg)
-    go (KindCo c)           = IfaceKindCo (go c)
-    go (SubCo co)           = IfaceSubCo (go co)
-    go (AxiomRuleCo co cs)  = IfaceAxiomRuleCo (toIfaceAxiomRule co) (map go cs)
+    go (AppCo co1 co2)     = IfaceAppCo  (go co1) (go co2)
+    go (SymCo co)          = IfaceSymCo (go co)
+    go (TransCo co1 co2)   = IfaceTransCo (go co1) (go co2)
+    go (SelCo d co)        = IfaceSelCo d (go co)
+    go (LRCo lr co)        = IfaceLRCo lr (go co)
+    go (InstCo co arg)     = IfaceInstCo (go co) (go arg)
+    go (KindCo c)          = IfaceKindCo (go c)
+    go (SubCo co)          = IfaceSubCo (go co)
+    go (AxiomCo ax cs)     = IfaceAxiomCo (toIfaceAxiomRule ax) (map go cs)
     go (UnivCo { uco_prov = p, uco_role = r, uco_lty = t1, uco_rty = t2, uco_deps = deps })
         = IfaceUnivCo p r (toIfaceTypeX fr t1) (toIfaceTypeX fr t2) (map go deps)
 

@@ -33,7 +33,7 @@ import GHC.Prelude
 import GHC.Core.Type
 import GHC.Core.Unify      ( tcMatchTys )
 import GHC.Data.Pair
-import GHC.Core.TyCon    ( TyCon, FamTyConFlav(..), mkFamilyTyCon
+import GHC.Core.TyCon    ( TyCon, FamTyConFlav(..), mkFamilyTyCon, tyConArity
                          , Injectivity(..), isBuiltInSynFamTyCon_maybe )
 import GHC.Core.Coercion.Axiom
 import GHC.Core.TyCo.Compare   ( tcEqType )
@@ -64,7 +64,6 @@ import GHC.Builtin.Names
                   )
 import GHC.Data.FastString
 import GHC.Utils.Panic
-import GHC.Utils.Misc
 import GHC.Utils.Outputable
 
 import Control.Monad ( guard )
@@ -141,28 +140,28 @@ There are a few steps to adding a built-in type family:
 tryInteractTopFam :: BuiltInSynFamily -> TyCon -> [Type] -> Type
                   -> [(CoAxiomRule, TypeEqn)]
 tryInteractTopFam fam fam_tc tys r
-  = [(BuiltInFamInteract ax_rule, eqn)
+  = [(BuiltInFamInteract ax_rule, eqn_out)
     | ax_rule  <- sfInteract fam
-    , Just eqn <- [bifint_proves ax_rule [eqn]] ]
+    , Just eqn_out <- [bifint_proves ax_rule eqn_in] ]
   where
-    eqn :: TypeEqn
-    eqn = Pair (mkTyConApp fam_tc tys) r
+    eqn_in :: TypeEqn
+    eqn_in = Pair (mkTyConApp fam_tc tys) r
 
 tryInteractInertFam :: BuiltInSynFamily -> TyCon
                     -> [Type] -> [Type] -- F tys1 ~ F tys2
                     -> [(CoAxiomRule, TypeEqn)]
 tryInteractInertFam builtin_fam fam_tc tys1 tys2
-  = [(BuiltInFamInteract ax_rule, eqn)
+  = [(BuiltInFamInteract ax_rule, eqn_out)
     | ax_rule  <- sfInteract builtin_fam
-    , Just eqn <- [bifint_proves ax_rule [eqn]] ]
+    , Just eqn_out <- [bifint_proves ax_rule eqn_in] ]
   where
-    eqn = Pair (mkTyConApp fam_tc tys1) (mkTyConApp fam_tc tys2)
+    eqn_in = Pair (mkTyConApp fam_tc tys1) (mkTyConApp fam_tc tys2)
 
 tryMatchFam :: BuiltInSynFamily -> [Type]
             -> Maybe (BuiltInFamRewrite, [Type], Type)
 -- Does this reduce on the given arguments?
 -- If it does, returns (CoAxiomRule, types to instantiate the rule at, rhs type)
--- That is: mkAxiomRuleCo ax (zipWith mkReflCo (coAxArgRuleRoles ax) ts)
+-- That is: mkAxiomCo ax (zipWith mkReflCo (coAxArgRuleRoles ax) ts)
 --              :: F tys ~r rhs,
 tryMatchFam builtin_fam arg_tys
   = listToMaybe $   -- Pick first rule to match
@@ -179,11 +178,11 @@ mkUnaryConstFoldAxiom :: TyCon -> String
                       -> (a -> Maybe Type)
                       -> BuiltInFamRewrite
 -- For the definitional axioms, like  (3+4 --> 7)
-mkUnaryConstFoldAxiom tc str isReqTy f
+mkUnaryConstFoldAxiom fam_tc str isReqTy f
   = BIF_Rewrite
       { bifrw_name      = fsLit str
-      , bifrw_arg_roles = [Nominal]
-      , bifrw_res_role  = Nominal
+      , bifrw_fam_tc    = fam_tc
+      , bifrw_arity     = 1
       , bifrw_match     = \ts -> do { [t1] <- return ts
                                     ; t1' <- isReqTy t1
                                     ; res <- f t1'
@@ -191,7 +190,7 @@ mkUnaryConstFoldAxiom tc str isReqTy f
       , bifrw_proves    = \cs -> do { [Pair s1 s2] <- return cs
                                     ; s2' <- isReqTy s2
                                     ; z   <- f s2'
-                                    ; return (mkTyConApp tc [s1] === z) }
+                                    ; return (mkTyConApp fam_tc [s1] === z) }
       }
 
 mkBinConstFoldAxiom :: TyCon -> String
@@ -200,11 +199,11 @@ mkBinConstFoldAxiom :: TyCon -> String
                     -> (a -> b -> Maybe Type)
                     -> BuiltInFamRewrite
 -- For the definitional axioms, like  (3+4 --> 7)
-mkBinConstFoldAxiom tc str isReqTy1 isReqTy2 f
+mkBinConstFoldAxiom fam_tc str isReqTy1 isReqTy2 f
   = BIF_Rewrite
       { bifrw_name      = fsLit str
-      , bifrw_arg_roles = [Nominal, Nominal]
-      , bifrw_res_role  = Nominal
+      , bifrw_fam_tc    = fam_tc
+      , bifrw_arity     = 2
       , bifrw_match     = \ts -> do { [t1,t2] <- return ts
                                     ; t1' <- isReqTy1 t1
                                     ; t2' <- isReqTy2 t2
@@ -214,31 +213,35 @@ mkBinConstFoldAxiom tc str isReqTy1 isReqTy2 f
                                     ; s2' <- isReqTy1 s2
                                     ; t2' <- isReqTy2 t2
                                     ; z   <- f s2' t2'
-                                    ; return (mkTyConApp tc [s1,t1] === z) }
+                                    ; return (mkTyConApp fam_tc [s1,t1] === z) }
       }
 
 mkRewriteAxiom :: TyCon -> String
-               -> [TyVar] -> [Type]  -- LHS
-               -> Type               -- RHS
+               -> [TyVar] -> [Type]  -- LHS of axiom
+               -> Type               -- RHS or axiom
                -> BuiltInFamRewrite
-mkRewriteAxiom tc str tpl_tvs lhs_tys rhs_ty
-  = BIF_Rewrite
-      { bifrw_name      = fsLit str
-      , bifrw_arg_roles = [Nominal | _ <- tpl_tvs]
-      , bifrw_res_role  = Nominal
-      , bifrw_match     = match_fn
-      , bifrw_proves    = inst_fn }
+mkRewriteAxiom fam_tc str tpl_tvs lhs_tys rhs_ty
+  = assertPpr (tyConArity fam_tc == length lhs_tys) (text str <+> ppr lhs_tys) $
+    BIF_Rewrite
+      { bifrw_name   = fsLit str
+      , bifrw_fam_tc = fam_tc
+      , bifrw_arity  = bif_arity
+      , bifrw_match  = match_fn
+      , bifrw_proves = inst_fn }
   where
+    bif_arity = length tpl_tvs
+
     match_fn :: [Type] -> Maybe ([Type],Type)
     match_fn arg_tys
-      = case tcMatchTys lhs_tys arg_tys of
+      = assertPpr (tyConArity fam_tc == length arg_tys) (text str <+> ppr arg_tys) $
+        case tcMatchTys lhs_tys arg_tys of
           Nothing    -> Nothing
           Just subst -> Just (substTyVars subst tpl_tvs, substTy subst rhs_ty)
 
     inst_fn :: [TypeEqn] -> Maybe TypeEqn
     inst_fn inst_eqns
-      = assertPpr (inst_eqns `equalLength` tpl_tvs) (text str $$ ppr inst_eqns) $
-        Just (mkTyConApp tc (substTys (zipTCvSubst tpl_tvs tys1) lhs_tys)
+      = assertPpr (length inst_eqns == bif_arity) (text str $$ ppr inst_eqns) $
+        Just (mkTyConApp fam_tc (substTys (zipTCvSubst tpl_tvs tys1) lhs_tys)
               ===
               substTy (zipTCvSubst tpl_tvs tys2) rhs_ty)
       where
@@ -251,12 +254,10 @@ mkTopUnaryFamDeduction :: String -> TyCon
 mkTopUnaryFamDeduction str fam_tc f
   = BIF_Interact
     { bifint_name      = fsLit str
-    , bifint_arg_roles = [Nominal]
-    , bifint_res_role  = Nominal
-    , bifint_proves    = \cs -> do { [Pair lhs rhs] <- return cs
-                                   ; (tc, [a]) <- splitTyConApp_maybe lhs
-                                   ; massertPpr (tc == fam_tc) (ppr tc $$ ppr fam_tc)
-                                   ; f a rhs } }
+    , bifint_proves    = \(Pair lhs rhs)
+                         -> do { (tc, [a]) <- splitTyConApp_maybe lhs
+                               ; massertPpr (tc == fam_tc) (ppr tc $$ ppr fam_tc)
+                               ; f a rhs } }
 
 mkTopBinFamDeduction :: String -> TyCon
                      -> (Type -> Type -> Type -> Maybe TypeEqn)
@@ -265,42 +266,32 @@ mkTopBinFamDeduction :: String -> TyCon
 mkTopBinFamDeduction str fam_tc f
   = BIF_Interact
     { bifint_name      = fsLit str
-    , bifint_arg_roles = [Nominal]
-    , bifint_res_role  = Nominal
-    , bifint_proves    = \cs -> do { [Pair lhs rhs] <- return cs
-                                   ; (tc, [a,b]) <- splitTyConApp_maybe lhs
-                                   ; massertPpr (tc == fam_tc) (ppr tc $$ ppr fam_tc)
-                                   ; f a b rhs } }
+    , bifint_proves    = \(Pair lhs rhs) ->
+                         do { (tc, [a,b]) <- splitTyConApp_maybe lhs
+                            ; massertPpr (tc == fam_tc) (ppr tc $$ ppr fam_tc)
+                            ; f a b rhs } }
 
 mkUnaryBIF :: String -> TyCon -> BuiltInFamInteract
 mkUnaryBIF str fam_tc
-  = BIF_Interact { bifint_name      = fsLit str
-                 , bifint_arg_roles = [Nominal]
-                 , bifint_res_role  = Nominal
-                 , bifint_proves    = proves }
+  = BIF_Interact { bifint_name   = fsLit str
+                 , bifint_proves = proves }
   where
-    proves cs
-      | [Pair lhs rhs] <- cs  -- Expect one coercion argument
+    proves (Pair lhs rhs)
       = do { (tc2, [x2]) <- splitTyConApp_maybe rhs
            ; guard (tc2 == fam_tc)
            ; (tc1, [x1]) <- splitTyConApp_maybe lhs
            ; massertPpr (tc1 == fam_tc) (ppr tc1 $$ ppr fam_tc)
            ; return (Pair x1 x2) }
-      | otherwise
-      = Nothing
 
 mkBinBIF :: String -> TyCon
          -> WhichArg -> WhichArg
          -> (Type -> Bool)         -- The guard on the equal args, if any
          -> BuiltInFamInteract
 mkBinBIF str fam_tc eq1 eq2 check_me
-  = BIF_Interact { bifint_name      = fsLit str
-                 , bifint_arg_roles = [Nominal]
-                 , bifint_res_role  = Nominal
-                 , bifint_proves    = proves }
+  = BIF_Interact { bifint_name   = fsLit str
+                 , bifint_proves = proves }
   where
-    proves cs
-      | [Pair lhs rhs] <- cs  -- Expect one coercion argument
+    proves (Pair lhs rhs)
       = do { (tc2, [x2,y2]) <- splitTyConApp_maybe rhs
            ; guard (tc2 == fam_tc)
            ; (tc1, [x1,y1]) <- splitTyConApp_maybe lhs
@@ -310,8 +301,6 @@ mkBinBIF str fam_tc eq1 eq2 check_me
                (ArgX,ArgY) -> do_it x1 y2 x2 y1
                (ArgY,ArgX) -> do_it y1 x2 y2 x1
                (ArgY,ArgY) -> do_it y1 y2 x1 x2 }
-      | otherwise
-      = Nothing
 
     do_it a1 a2 b1 b2 = do { same a1 a2; guard (check_me a1); return (Pair b1 b2) }
 

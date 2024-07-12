@@ -81,7 +81,7 @@ axF :: {                                         F [Int] ~ Bool
        ; forall (k :: *) (a :: k -> *) (b :: k). F (a b) ~ Char
        }
 
-The axiom is used with the AxiomRuleCo constructor of Coercion. If we wish
+The axiom is used with the AxiomCo constructor of Coercion. If we wish
 to have a coercion showing that F (Maybe Int) ~ Char, it will look like
 
 axF[2] <*> <Maybe> <Int> :: F (Maybe Int) ~ Char
@@ -574,23 +574,23 @@ CoAxiomRules come in two flavours:
       (ax1)    3+4 ----> 7
       (ax2)    s+0 ----> s
   The evidence looks like
-      AxiomRuleCo ax1 [3,4] :: 3+4 ~ 7
-      AxiomRuleCo ax2 [s]   :: s+0 ~ s
-  The arguments in the AxiomRuleCo are the /instantiating types/, or
-  more generally cocerions, see Note [Coercion axioms applied to coercions]
+      AxiomCo ax1 [3,4] :: 3+4 ~ 7
+      AxiomCo ax2 [s]   :: s+0 ~ s
+  The arguments in the AxiomCo are the /instantiating types/, or
+  more generally coercions (see Note [Coercion axioms applied to coercions]
   in GHC.Core.TyCo.Rep).
 
 * BuiltInFamInteract: provides evidence for the consequences of one or two
   other coercions.  For example
-      (ax3)   g1: a+b ~ 0               --->    a~0
-      (ax4)   g2: a+b ~ 0               --->    b~0
+      (ax3)   g1: a+b ~ 0               --->  a~0
+      (ax4)   g2: a+b ~ 0               --->  b~0
       (ax5)   g3: a+b1~r1, g4 : a+b2~r  --->  b1~b2
-  The arguments to the AxiomRuleCo are the full coercions
+  The arguments to the AxiomCo are the full coercions
   (not types, right from the get-go).
   So then:
-      AxiomRuleCo ax3 [g1]    :: a ~ 0
-      AxiomRuleCo ax2 [g2]    :: b ~ 0
-      AxiomRuleCo ax3 [g3,g4] :: b1 ~ b2
+      AxiomCo ax3 [g1]    :: a ~ 0
+      AxiomCo ax4 [g2]    :: b ~ 0
+      AxiomCo ax5 [g3,g4] :: b1 ~ b2
 
 -}
 
@@ -609,14 +609,14 @@ instance Eq CoAxiomRule where
   _ == _ = False
 
 coAxiomRuleRole :: CoAxiomRule -> Role
-coAxiomRuleRole (BuiltInFamRewrite  bif) = bifrw_res_role bif
-coAxiomRuleRole (BuiltInFamInteract bif) = bifint_res_role bif
-coAxiomRuleRole (UnbranchedAxiom ax)     = coAxiomRole ax
-coAxiomRuleRole (BranchedAxiom ax _)     = coAxiomRole ax
+coAxiomRuleRole (BuiltInFamRewrite  {}) = Nominal
+coAxiomRuleRole (BuiltInFamInteract {}) = Nominal
+coAxiomRuleRole (UnbranchedAxiom ax)    = coAxiomRole ax
+coAxiomRuleRole (BranchedAxiom ax _)    = coAxiomRole ax
 
 coAxiomRuleArgRoles :: CoAxiomRule -> [Role]
-coAxiomRuleArgRoles (BuiltInFamRewrite  bif) = bifrw_arg_roles  bif
-coAxiomRuleArgRoles (BuiltInFamInteract bif) = bifint_arg_roles bif
+coAxiomRuleArgRoles (BuiltInFamRewrite  bif) = replicate (bifrw_arity bif) Nominal
+coAxiomRuleArgRoles (BuiltInFamInteract {})  = [Nominal]
 coAxiomRuleArgRoles (UnbranchedAxiom ax)     = coAxBranchRoles (coAxiomSingleBranch ax)
 coAxiomRuleArgRoles (BranchedAxiom ax i)     = coAxBranchRoles (coAxiomNthBranch ax i)
 
@@ -636,11 +636,6 @@ instance Data.Data CoAxiomRule where
   gunfold _ _  = error "gunfold"
   dataTypeOf _ = mkNoRepType "CoAxiomRule"
 
---instance Ord CoAxiomRule where
---  -- we compare lexically to avoid non-deterministic output when sets of rules
---  -- are printed
---  compare x y = lexicalCompareFS (coaxrName x) (coaxrName y)
-
 instance Outputable CoAxiomRule where
   ppr (BuiltInFamRewrite  bif) = ppr (bifrw_name bif)
   ppr (BuiltInFamInteract bif) = ppr (bifint_name bif)
@@ -659,40 +654,47 @@ type TypeEqn = Pair Type
 
 -- Type checking of built-in families
 data BuiltInSynFamily = BuiltInSynFamily
-  { sfMatchFam      :: [BuiltInFamRewrite]
-
-  , sfInteract:: [BuiltInFamInteract]
+  { sfMatchFam :: [BuiltInFamRewrite]
+  , sfInteract :: [BuiltInFamInteract]
     -- If given these type arguments and RHS, returns the equalities that
     -- are guaranteed to hold.  That is, if
     --     (ar, Pair s1 s2)  is an element of  (sfInteract tys ty)
     -- then  AxiomRule ar [co :: F tys ~ ty]  ::  s1~s2
   }
 
-data BuiltInFamInteract
+data BuiltInFamInteract  -- Argument and result role are always Nominal
   = BIF_Interact
-      { bifint_name      :: FastString
-      , bifint_arg_roles :: [Role]    -- roles of parameter equations
-      , bifint_res_role  :: Role      -- role of resulting equation
-      , bifint_proves    :: [TypeEqn] -> Maybe TypeEqn
+      { bifint_name   :: FastString
+      , bifint_proves :: TypeEqn -> Maybe TypeEqn
             -- ^ Returns @Nothing@ when it doesn't like
             -- the supplied arguments.  When this happens in a coercion
             -- that means that the coercion is ill-formed, and Core Lint
             -- checks for that.
       }
 
-data BuiltInFamRewrite
+data BuiltInFamRewrite  -- Argument roles and result role are always Nominal
   = BIF_Rewrite
-      { bifrw_name      :: FastString
-      , bifrw_arg_roles :: [Role]    -- roles of parameter equations
-      , bifrw_res_role  :: Role      -- role of resulting equation
+      { bifrw_name   :: FastString
+      , bifrw_fam_tc :: TyCon       -- Needed for tyConsOfType
 
-      , bifrw_match :: [Type] -> Maybe ([Type], Type)   -- Instantiating types and result type
+      , bifrw_arity  :: Arity       -- Number of type arguments needed
+                                    -- to instantiate this axiom
+
+      , bifrw_match :: [Type] -> Maybe ([Type], Type)
            -- coaxrMatch: does this reduce on the given arguments?
-           -- If it does, returns (CoAxiomRule, types to instantiate the rule at, rhs type)
-           -- That is: mkAxiomRuleCo ax (zipWith mkReflCo coAxiomRuleArgRoles ts)
-           --              :: F tys ~coaxrRole rhs,
+           -- If it does, returns (types to instantiate the rule at, rhs type)
+           -- That is: mkAxiomCo ax (zipWith mkReflCo coAxiomRuleArgRoles ts)
+           --              :: F tys ~N rhs,
 
       , bifrw_proves :: [TypeEqn] -> Maybe TypeEqn }
+           -- length(inst_tys) = bifrw_arity
+
+      -- INVARIANT: bifrw_match and bifrw_proves are related as follows:
+      -- If    Just (inst_tys, res_ty) = bifrw_match ax arg_tys
+      -- then  * length arg_tys = tyConArity fam_tc
+      --       * length inst_tys = bifrw_arity
+       --      * bifrw_proves (map mkNomReflCo inst_tys) = Just (mkNomReflCo res_ty)
+
 
 -- Provides default implementations that do nothing.
 trivialBuiltInFamily :: BuiltInSynFamily

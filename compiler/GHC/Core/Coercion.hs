@@ -45,7 +45,7 @@ module GHC.Core.Coercion (
         mkPhantomCo,
         mkHoleCo, mkUnivCo, mkSubCo,
         mkProofIrrelCo,
-        downgradeRole, mkAxiomRuleCo,
+        downgradeRole, mkAxiomCo,
         mkGReflRightCo, mkGReflLeftCo, mkCoherenceLeftCo, mkCoherenceRightCo,
         mkKindCo,
         castCoercionKind, castCoercionKind1, castCoercionKind2,
@@ -1029,10 +1029,10 @@ mkAxInstCo :: Role
 -- Only called with BranchedAxiom or UnbranchedAxiom
 mkAxInstCo role axr tys cos
   | arity == n_tys = downgradeRole role ax_role $
-                     AxiomRuleCo axr (rtys `chkAppend` cos)
+                     AxiomCo axr (rtys `chkAppend` cos)
   | otherwise      = assert (arity < n_tys) $
                      downgradeRole role ax_role $
-                     mkAppCos (AxiomRuleCo axr (ax_args `chkAppend` cos))
+                     mkAppCos (AxiomCo axr (ax_args `chkAppend` cos))
                               leftover_args
   where
     (ax_role, branch)        = case coAxiomRuleBranch_maybe axr of
@@ -1045,8 +1045,8 @@ mkAxInstCo role axr tys cos
     (ax_args, leftover_args) = splitAt arity rtys
 
 -- worker function
-mkAxiomRuleCo :: CoAxiomRule -> [Coercion] -> Coercion
-mkAxiomRuleCo = AxiomRuleCo
+mkAxiomCo :: CoAxiomRule -> [Coercion] -> Coercion
+mkAxiomCo = AxiomCo
 
 -- to be used only with unbranched axioms
 mkUnbranchedAxInstCo :: Role -> CoAxiom Unbranched
@@ -1452,7 +1452,6 @@ setNominalRole_maybe r co
     setNominalRole_maybe_helper co@(UnivCo { uco_prov = prov })
       | case prov of PhantomProv {}    -> False  -- should always be phantom
                      ProofIrrelProv {} -> True   -- it's always safe
-                     BuiltinProv {}    -> True   -- always nominal
                      PluginProv {}     -> False  -- who knows? This choice is conservative.
       = Just $ co { uco_role = Nominal }
     setNominalRole_maybe_helper _ = Nothing
@@ -1571,10 +1570,12 @@ promoteCoercion co = case co of
        -- We can get Type~Constraint or Constraint~Type
        -- from FunCo {} :: (a -> (b::Type)) ~ (a -=> (b'::Constraint))
 
-    CoVarCo {}     -> mkKindCo co
-    HoleCo {}      -> mkKindCo co
-    AxiomRuleCo {} -> mkKindCo co
-    UnivCo {}      -> mkKindCo co
+    CoVarCo {} -> mkKindCo co
+    HoleCo {}  -> mkKindCo co
+    AxiomCo {} -> mkKindCo co
+    UnivCo {}  -> mkKindCo co  -- We could instead return the (single) `uco_deps` coercion in
+                               -- the `ProofIrrelProv` and `PhantomProv` cases, but it doesn't
+                               -- quite seem worth doing.
 
     SymCo g
       -> mkSymCo (promoteCoercion g)
@@ -2383,28 +2384,28 @@ seqMCo MRefl    = ()
 seqMCo (MCo co) = seqCo co
 
 seqCo :: Coercion -> ()
-seqCo (Refl ty)                 = seqType ty
-seqCo (GRefl r ty mco)          = r `seq` seqType ty `seq` seqMCo mco
-seqCo (TyConAppCo r tc cos)     = r `seq` tc `seq` seqCos cos
-seqCo (AppCo co1 co2)           = seqCo co1 `seq` seqCo co2
-seqCo (ForAllCo tv visL visR k co) = seqType (varType tv) `seq`
-                                      rnf visL `seq` rnf visR `seq`
-                                      seqCo k `seq` seqCo co
-seqCo (FunCo r af1 af2 w co1 co2) = r `seq` af1 `seq` af2 `seq`
-                                    seqCo w `seq` seqCo co1 `seq` seqCo co2
-seqCo (CoVarCo cv)              = cv `seq` ()
-seqCo (HoleCo h)                = coHoleCoVar h `seq` ()
+seqCo (Refl ty)             = seqType ty
+seqCo (GRefl r ty mco)      = r `seq` seqType ty `seq` seqMCo mco
+seqCo (TyConAppCo r tc cos) = r `seq` tc `seq` seqCos cos
+seqCo (AppCo co1 co2)       = seqCo co1 `seq` seqCo co2
+seqCo (CoVarCo cv)          = cv `seq` ()
+seqCo (HoleCo h)            = coHoleCoVar h `seq` ()
+seqCo (SymCo co)            = seqCo co
+seqCo (TransCo co1 co2)     = seqCo co1 `seq` seqCo co2
+seqCo (SelCo n co)          = n `seq` seqCo co
+seqCo (LRCo lr co)          = lr `seq` seqCo co
+seqCo (InstCo co arg)       = seqCo co `seq` seqCo arg
+seqCo (KindCo co)           = seqCo co
+seqCo (SubCo co)            = seqCo co
+seqCo (AxiomCo _ cs)        = seqCos cs
+seqCo (ForAllCo tv visL visR k co)
+  = seqType (varType tv) `seq` rnf visL `seq` rnf visR `seq`
+    seqCo k `seq` seqCo co
+seqCo (FunCo r af1 af2 w co1 co2)
+  = r `seq` af1 `seq` af2 `seq` seqCo w `seq` seqCo co1 `seq` seqCo co2
 seqCo (UnivCo { uco_prov = p, uco_role = r
               , uco_lty = t1, uco_rty = t2, uco_deps = deps })
   = p `seq` r `seq` seqType t1 `seq` seqType t2 `seq` seqCos deps
-seqCo (SymCo co)                = seqCo co
-seqCo (TransCo co1 co2)         = seqCo co1 `seq` seqCo co2
-seqCo (SelCo n co)              = n `seq` seqCo co
-seqCo (LRCo lr co)              = lr `seq` seqCo co
-seqCo (InstCo co arg)           = seqCo co `seq` seqCo arg
-seqCo (KindCo co)               = seqCo co
-seqCo (SubCo co)                = seqCo co
-seqCo (AxiomRuleCo _ cs)        = seqCos cs
 
 seqCos :: [Coercion] -> ()
 seqCos []       = ()
@@ -2446,8 +2447,8 @@ coercionRKind co = coercion_lr_kind CRight co
 
 coercion_lr_kind :: HasDebugCallStack => LeftOrRight -> Coercion -> Type
 {-# INLINE coercion_lr_kind #-}
-coercion_lr_kind which co
-  = go co
+coercion_lr_kind which orig_co
+  = go orig_co
   where
     go (Refl ty)              = ty
     go (GRefl _ ty MRefl)     = ty
@@ -2463,7 +2464,7 @@ coercion_lr_kind which co
     go (KindCo co)            = typeKind (go co)
     go (SubCo co)             = go co
     go (SelCo d co)           = selectFromType d (go co)
-    go (AxiomRuleCo ax cos)   = go_ax ax cos
+    go (AxiomCo ax cos)       = go_ax ax cos
 
     go (UnivCo { uco_lty = lty, uco_rty = rty})
       = pickLR which (lty, rty)
@@ -2493,15 +2494,17 @@ coercion_lr_kind which co
     go_app co              args = piResultTys (go co) args
 
     -------------
-    go_ax (BuiltInFamRewrite  bif) cos = go_bif (bifrw_proves bif)  cos
-    go_ax (BuiltInFamInteract bif) cos = go_bif (bifint_proves bif) cos
-    go_ax (UnbranchedAxiom ax)     cos = go_branch ax (coAxiomSingleBranch ax) cos
-    go_ax (BranchedAxiom ax i)     cos = go_branch ax (coAxiomNthBranch ax i)  cos
+    go_ax (BuiltInFamRewrite  bif) cos  = check_bif_res (bifrw_proves bif (map coercionKind cos))
+    go_ax (BuiltInFamInteract bif) [co] = check_bif_res (bifint_proves bif (coercionKind co))
+    go_ax (BuiltInFamInteract {})  _    = crash
+    go_ax (UnbranchedAxiom ax)     cos  = go_branch ax (coAxiomSingleBranch ax) cos
+    go_ax (BranchedAxiom ax i)     cos  = go_branch ax (coAxiomNthBranch ax i)  cos
 
     -------------
-    go_bif proves cos = case proves (map coercionKind cos) of
-                          Nothing -> pprPanic "coercionKind" (ppr cos)
-                          Just (Pair lty rty) -> pickLR which (lty, rty)
+    check_bif_res (Just (Pair lhs rhs)) = pickLR which (lhs,rhs)
+    check_bif_res Nothing               = crash
+
+    crash = pprPanic "coercionKind" (ppr orig_co)
 
     -------------
     go_branch :: CoAxiom br -> CoAxBranch -> [Coercion] -> Type
@@ -2569,16 +2572,13 @@ coercion_lr_kind which co
       -- when other_co is not a ForAllCo
       = substTy subst (go other_co)
 
-{-
-
-Note [Nested ForAllCos]
-~~~~~~~~~~~~~~~~~~~~~~~
-
-Suppose we need `coercionKind (ForAllCo a1 (ForAllCo a2 ... (ForAllCo an
-co)...) )`.   We do not want to perform `n` single-type-variable
-substitutions over the kind of `co`; rather we want to do one substitution
-which substitutes for all of `a1`, `a2` ... simultaneously.  If we do one
-at a time we get the performance hole reported in #11735.
+{- Note [Nested ForAllCos]
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+Suppose we need `coercionKind (ForAllCo a1 (ForAllCo a2 ... (ForAllCo an co)...) )`.
+We do not want to perform `n` single-type-variable substitutions over the kind
+of `co`; rather we want to do one substitution which substitutes for all of
+`a1`, `a2` ... simultaneously.  If we do one at a time we get the performance
+hole reported in #11735.
 
 Solution: gather up the type variables for nested `ForAllCos`, and
 substitute for them all at once.  Remarkably, for #11735 this single
@@ -2606,7 +2606,7 @@ coercionRole = go
     go (InstCo co _)                = go co
     go (KindCo {})                  = Nominal
     go (SubCo _)                    = Representational
-    go (AxiomRuleCo ax _)           = coAxiomRuleRole ax
+    go (AxiomCo ax _)               = coAxiomRuleRole ax
 
 {-
 Note [Nested InstCos]

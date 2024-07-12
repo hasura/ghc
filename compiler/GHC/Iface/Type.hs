@@ -476,7 +476,7 @@ data IfaceCoercion
   | IfaceAppCo        IfaceCoercion IfaceCoercion
   | IfaceForAllCo     IfaceBndr !ForAllTyFlag !ForAllTyFlag IfaceCoercion IfaceCoercion
   | IfaceCoVarCo      IfLclName
-  | IfaceAxiomRuleCo  IfaceAxiomRule [IfaceCoercion]
+  | IfaceAxiomCo      IfaceAxiomRule [IfaceCoercion]
        -- ^ There are only a fixed number of CoAxiomRules, so it suffices
        -- to use an IfaceLclName to distinguish them.
        -- See Note [Adding built-in type families] in GHC.Builtin.Types.Literals
@@ -711,7 +711,7 @@ substIfaceType env ty
     go_co (IfaceInstCo c1 c2)        = IfaceInstCo (go_co c1) (go_co c2)
     go_co (IfaceKindCo co)           = IfaceKindCo (go_co co)
     go_co (IfaceSubCo co)            = IfaceSubCo (go_co co)
-    go_co (IfaceAxiomRuleCo n cos)   = IfaceAxiomRuleCo n (go_cos cos)
+    go_co (IfaceAxiomCo n cos)       = IfaceAxiomCo n (go_cos cos)
 
     go_cos = map go_co
 
@@ -2013,7 +2013,7 @@ ppr_co ctxt_prec (IfaceInstCo co ty)
     text "Inst" <+> sep [ pprParendIfaceCoercion co
                         , pprParendIfaceCoercion ty ]
 
-ppr_co ctxt_prec (IfaceAxiomRuleCo ax cos)
+ppr_co ctxt_prec (IfaceAxiomCo ax cos)
   = ppr_special_co ctxt_prec (pprIfAxRule ax) cos
 ppr_co ctxt_prec (IfaceSymCo co)
   = ppr_special_co ctxt_prec (text "Sym") [co]
@@ -2399,7 +2399,7 @@ instance Binary IfaceCoercion where
   put_ bh (IfaceSubCo a) = do
           putByte bh 16
           put_ bh a
-  put_ bh (IfaceAxiomRuleCo a b) = do
+  put_ bh (IfaceAxiomCo a b) = do
           putByte bh 17
           put_ bh a
           put_ bh b
@@ -2465,7 +2465,7 @@ instance Binary IfaceCoercion where
                    return $ IfaceSubCo a
            17-> do a <- get bh
                    b <- get bh
-                   return $ IfaceAxiomRuleCo a b
+                   return $ IfaceAxiomCo a b
            _ -> panic ("get IfaceCoercion " ++ show tag)
 
 instance Binary IfaceAxiomRule where
@@ -2516,7 +2516,7 @@ instance NFData IfaceCoercion where
     IfaceAppCo f1 f2 -> rnf f1 `seq` rnf f2
     IfaceForAllCo f1 f2 f3 f4 f5 -> rnf f1 `seq` rnf f2 `seq` rnf f3 `seq` rnf f4 `seq` rnf f5
     IfaceCoVarCo f1 -> rnf f1
-    IfaceAxiomRuleCo f1 f2 -> rnf f1 `seq` rnf f2
+    IfaceAxiomCo f1 f2 -> rnf f1 `seq` rnf f2
     IfaceUnivCo f1 f2 f3 f4 deps -> rnf f1 `seq` f2 `seq` rnf f3 `seq` rnf f4 `seq` rnf deps
     IfaceSymCo f1 -> rnf f1
     IfaceTransCo f1 f2 -> rnf f1 `seq` rnf f2

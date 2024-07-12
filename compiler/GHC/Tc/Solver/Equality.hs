@@ -2969,7 +2969,7 @@ improveGivenTopFunEqs fam_tc args ev rhs_ty
        ; emitNewGivens (ctEvLoc ev) $
            [ (Nominal, new_co)
            | (ax, _) <- tryInteractTopFam ops fam_tc args rhs_ty
-           , let new_co = mkAxiomRuleCo ax [given_co] ]
+           , let new_co = mkAxiomCo ax [given_co] ]
        ; return False }  -- False: no unifications
   | otherwise
   = return False
@@ -3124,7 +3124,7 @@ improveGivenLocalFunEqs funeqs_for_tc fam_tc work_args work_ev work_rhs
              -- this that matters.
       where
         inert_co = ctEvCoercion inert_ev
-        mk_ax_co (ax,_) = (Nominal, mkAxiomRuleCo ax [combined_co])
+        mk_ax_co (ax,_) = (Nominal, mkAxiomCo ax [combined_co])
           where
             combined_co = given_co `mkTransCo` mkSymCo inert_co
             -- given_co :: F work_args  ~ rhs

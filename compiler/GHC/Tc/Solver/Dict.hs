@@ -1405,7 +1405,7 @@ parameters, is that we simply produce new Wanted equalities.  So for example
     where 'cv' is currently unused.  However, this new item can perhaps be
     spontaneously solved to become given and react with d2,
     discharging it in favour of a new constraint d2' thus:
-        [W[ d2' : D Int Bool
+        [W] d2' : D Int Bool
         d2 := d2' |> D Int cv
     Now d2' can be discharged from d1
 

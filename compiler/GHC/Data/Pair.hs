@@ -64,3 +64,5 @@ unzipPairs [] = ([], [])
 unzipPairs (Pair a b : prs) = (a:as, b:bs)
   where
     !(as,bs) = unzipPairs prs
+    -- This makes the unzip work eagerly, building no thunks at
+    -- the cost of doing all the work up-front.

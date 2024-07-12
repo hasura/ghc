@@ -907,7 +907,7 @@ data Coercion
   | CoVarCo CoVar      -- :: _ -> (N or R)
                        -- result role depends on the tycon of the variable's type
 
-  | AxiomRuleCo CoAxiomRule [Coercion]
+  | AxiomCo CoAxiomRule [Coercion]
      -- The coercion arguments always *precisely* saturate
      -- arity of (that branch of) the CoAxiom. If there are
      -- any left over, we use AppCo.
@@ -1533,7 +1533,7 @@ is entirely separate, but they all share the need to represent these fields:
       , uco_deps         :: [Coercion]  -- Coercions on which it depends
 
 Here,
- * uco_role, uco_lty, uco_rty express the type of the coercoin
+ * uco_role, uco_lty, uco_rty express the type of the coercion
  * uco_prov says where it came from
  * uco_deps specifies the coercions on which this proof (which is not
    explicity given) depends. See
@@ -1560,15 +1560,10 @@ data UnivCoProvenance
       -- ^ From a plugin, which asserts that this coercion is sound.
       --   The string and the variable set are for the use by the plugin.
 
-  | BuiltinProv   -- The proof comes form GHC's knowledge of arithmetic
-                  -- or strings; e.g. from (co : a+b ~ 0) we can deduce that
-                  -- (a ~ 0) and (b ~ 0), with a BuiltinProv proof.
-
   deriving (Eq, Ord, Data.Data)
   -- Why Ord?  See Note [Ord instance of IfaceType] in GHC.Iface.Type
 
 instance Outputable UnivCoProvenance where
-  ppr BuiltinProv      = text "(builtin)"
   ppr PhantomProv      = text "(phantom)"
   ppr ProofIrrelProv   = text "(proof irrel)"
   ppr (PluginProv str) = parens (text "plugin" <+> brackets (text str))
@@ -1577,17 +1572,15 @@ instance NFData UnivCoProvenance where
   rnf p = p `seq` ()
 
 instance Binary UnivCoProvenance where
-  put_ bh BuiltinProv    = putByte bh 1
-  put_ bh PhantomProv    = putByte bh 2
-  put_ bh ProofIrrelProv = putByte bh 3
-  put_ bh (PluginProv a) = putByte bh 4 >> put_ bh a
+  put_ bh PhantomProv    = putByte bh 1
+  put_ bh ProofIrrelProv = putByte bh 2
+  put_ bh (PluginProv a) = putByte bh 3 >> put_ bh a
   get bh = do
       tag <- getByte bh
       case tag of
-           1 -> return BuiltinProv
-           2 -> return PhantomProv
-           3 -> return ProofIrrelProv
-           4 -> do a <- get bh
+           1 -> return PhantomProv
+           2 -> return ProofIrrelProv
+           3 -> do a <- get bh
                    return $ PluginProv a
            _ -> panic ("get UnivCoProvenance " ++ show tag)
 
@@ -1614,7 +1607,7 @@ A ProofIrrelProv is a coercion between coercions. For example:
 In core, we get
 
   G :: * -> *
-  MkG :: forall (a :: *). (a ~ Bool) -> G a
+  MkG :: forall (a :: *). (a ~# Bool) -> G a
 
 Now, consider 'MkG -- that is, MkG used in a type -- and suppose we want
 a proof that ('MkG a1 co1) ~ ('MkG a2 co2). This will have to be
@@ -1631,8 +1624,8 @@ Note that
 Here,
   co3 = UnivCo ProofIrrelProv Nominal (CoercionTy co1) (CoercionTy co2) [co5]
   where
-    co5 :: (a1 ~ Bool) ~ (a2 ~ Bool)
-    co5 = TyConAppCo Nominal (~#) [<*>, <*>, co4, <Bool>]
+    co5 :: (a1 ~# Bool) ~# (a2 ~# Bool)
+    co5 = TyConAppCo Nominal (~#) [<Consraint#>, <Constraint#>, co4, <Bool>]
 
 
 Note [The importance of tracking UnivCo dependencies]
@@ -1961,7 +1954,7 @@ foldTyCo (TyCoFolder { tcf_view       = view
     go_co env (TyConAppCo _ _ args)    = go_cos env args
     go_co env (AppCo c1 c2)            = go_co env c1 `mappend` go_co env c2
     go_co env (CoVarCo cv)             = covar env cv
-    go_co env (AxiomRuleCo _ cos)      = go_cos env cos
+    go_co env (AxiomCo _ cos)          = go_cos env cos
     go_co env (HoleCo hole)            = cohole env hole
     go_co env (UnivCo { uco_lty = t1, uco_rty = t2, uco_deps = deps })
                                        = go_ty env t1 `mappend` go_ty env t2
@@ -2033,7 +2026,7 @@ coercionSize (FunCo _ _ _ w c1 c2) = 1 + coercionSize c1 + coercionSize c2
                                                          + coercionSize w
 coercionSize (CoVarCo _)         = 1
 coercionSize (HoleCo _)          = 1
-coercionSize (AxiomRuleCo _ cs)     = 1 + sum (map coercionSize cs)
+coercionSize (AxiomCo _ cs)      = 1 + sum (map coercionSize cs)
 coercionSize (UnivCo { uco_lty = t1, uco_rty = t2 })  = 1 + typeSize t1 + typeSize t2
 coercionSize (SymCo co)          = 1 + coercionSize co
 coercionSize (TransCo co1 co2)   = 1 + coercionSize co1 + coercionSize co2

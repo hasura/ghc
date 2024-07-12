@@ -57,7 +57,7 @@ import {-# SOURCE #-} GHC.Core.Coercion
    ( mkCoVarCo, mkKindCo, mkSelCo, mkTransCo
    , mkNomReflCo, mkSubCo, mkSymCo
    , mkFunCo2, mkForAllCo, mkUnivCo
-   , mkAxiomRuleCo, mkAppCo, mkGReflCo
+   , mkAxiomCo, mkAppCo, mkGReflCo
    , mkInstCo, mkLRCo, mkTyConAppCo
    , mkCoercionType
    , coercionKind, coercionLKind, coVarTypesRole )
@@ -879,7 +879,7 @@ subst_co subst co
     go (Refl ty)             = mkNomReflCo $! (go_ty ty)
     go (GRefl r ty mco)      = (mkGReflCo r $! (go_ty ty)) $! (go_mco mco)
     go (TyConAppCo r tc args)= mkTyConAppCo r tc $! go_cos args
-    go (AxiomRuleCo con cos) = mkAxiomRuleCo con $! go_cos cos
+    go (AxiomCo con cos)     = mkAxiomCo con $! go_cos cos
     go (AppCo co arg)        = (mkAppCo $! go co) $! go arg
     go (ForAllCo tv visL visR kind_co co)
       = case substForAllCoBndrUnchecked subst tv kind_co of

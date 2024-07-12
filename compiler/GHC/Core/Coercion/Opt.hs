@@ -355,7 +355,7 @@ opt_co4 env sym rep r (CoVarCo cv)
 opt_co4 _ _ _ _ (HoleCo h)
   = pprPanic "opt_univ fell into a hole" (ppr h)
 
-opt_co4 env sym rep r (AxiomRuleCo con cos)
+opt_co4 env sym rep r (AxiomCo con cos)
     -- Do *not* push sym inside top-level axioms
     -- e.g. if g is a top-level axiom
     --   g a : f a ~ a
@@ -365,9 +365,9 @@ opt_co4 env sym rep r (AxiomRuleCo con cos)
     wrapSym sym $
                        -- some sub-cos might be P: use opt_co2
                        -- See Note [Optimising coercion optimisation]
-    AxiomRuleCo con (zipWith (opt_co2 env False)
-                             (coAxiomRuleArgRoles con)
-                             cos)
+    AxiomCo con (zipWith (opt_co2 env False)
+                         (coAxiomRuleArgRoles con)
+                         cos)
       -- Note that the_co does *not* have sym pushed into it
 
 opt_co4 env sym rep r (UnivCo { uco_prov = prov, uco_lty = t1
@@ -833,8 +833,8 @@ opt_trans_rule is co1 co2
   -- If we put TrPushSymAxR first, we'll get
   --    (axN ty ; sym (axN ty)) :: N ty ~ N ty -- Obviously Refl
   --    --> axN (sym (axN ty))  :: N ty ~ N ty -- Very stupid
-  | Just (sym1, axr1, cos1) <- isAxiomRuleCo_maybe co1
-  , Just (sym2, axr2, cos2) <- isAxiomRuleCo_maybe co2
+  | Just (sym1, axr1, cos1) <- isAxiomCo_maybe co1
+  , Just (sym2, axr2, cos2) <- isAxiomCo_maybe co2
   , axr1 == axr2
   , sym1 == not sym2
   , Just (tc, role, branch) <- coAxiomRuleBranch_maybe axr1
@@ -853,31 +853,31 @@ opt_trans_rule is co1 co2
   -- See Note [Push transitivity inside axioms] and
   -- Note [Push transitivity inside newtype axioms only]
   -- TrPushSymAxR
-  | Just (sym, axr, cos1) <- isAxiomRuleCo_maybe co1
+  | Just (sym, axr, cos1) <- isAxiomCo_maybe co1
   , True <- sym
   , Just cos2 <- matchNewtypeBranch sym axr co2
-  , let newAxInst = AxiomRuleCo axr (opt_transList is (map mkSymCo cos2) cos1)
+  , let newAxInst = AxiomCo axr (opt_transList is (map mkSymCo cos2) cos1)
   = fireTransRule "TrPushSymAxR" co1 co2 $ SymCo newAxInst
 
   -- TrPushAxR
-  | Just (sym, axr, cos1) <- isAxiomRuleCo_maybe co1
+  | Just (sym, axr, cos1) <- isAxiomCo_maybe co1
   , False <- sym
   , Just cos2 <- matchNewtypeBranch sym axr co2
-  , let newAxInst = AxiomRuleCo axr (opt_transList is cos1 cos2)
+  , let newAxInst = AxiomCo axr (opt_transList is cos1 cos2)
   = fireTransRule "TrPushAxR" co1 co2 newAxInst
 
   -- TrPushSymAxL
-  | Just (sym, axr, cos2) <- isAxiomRuleCo_maybe co2
+  | Just (sym, axr, cos2) <- isAxiomCo_maybe co2
   , True <- sym
   , Just cos1 <- matchNewtypeBranch (not sym) axr co1
-  , let newAxInst = AxiomRuleCo axr (opt_transList is cos2 (map mkSymCo cos1))
+  , let newAxInst = AxiomCo axr (opt_transList is cos2 (map mkSymCo cos1))
   = fireTransRule "TrPushSymAxL" co1 co2 $ SymCo newAxInst
 
   -- TrPushAxL
-  | Just (sym, axr, cos2) <- isAxiomRuleCo_maybe co2
+  | Just (sym, axr, cos2) <- isAxiomCo_maybe co2
   , False <- sym
   , Just cos1 <- matchNewtypeBranch (not sym) axr co1
-  , let newAxInst = AxiomRuleCo axr (opt_transList is cos1 cos2)
+  , let newAxInst = AxiomCo axr (opt_transList is cos1 cos2)
   = fireTransRule "TrPushAxL" co1 co2 newAxInst
 
 
@@ -1132,13 +1132,13 @@ chooseRole True _ = Representational
 chooseRole _    r = r
 
 -----------
-isAxiomRuleCo_maybe :: Coercion -> Maybe (SymFlag, CoAxiomRule, [Coercion])
+isAxiomCo_maybe :: Coercion -> Maybe (SymFlag, CoAxiomRule, [Coercion])
 -- We don't expect to see nested SymCo; and that lets us write a simple,
 -- non-recursive function. (If we see a nested SymCo we'll just fail,
 -- which is ok.)
-isAxiomRuleCo_maybe (SymCo (AxiomRuleCo ax cos)) = Just (True, ax, cos)
-isAxiomRuleCo_maybe (AxiomRuleCo ax cos)         = Just (False, ax, cos)
-isAxiomRuleCo_maybe _                            = Nothing
+isAxiomCo_maybe (SymCo (AxiomCo ax cos)) = Just (True, ax, cos)
+isAxiomCo_maybe (AxiomCo ax cos)         = Just (False, ax, cos)
+isAxiomCo_maybe _                        = Nothing
 
 matchNewtypeBranch :: Bool -- True = match LHS, False = match RHS
                    -> CoAxiomRule
