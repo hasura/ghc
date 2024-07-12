@@ -862,6 +862,7 @@ mkLoadInstr config (RegFormat reg fmt) delta slot =
 --
 -- NB: this function does not check the availability of the necessary
 -- SSE/AVX/AVX512 instructions.
+-- See Note [AutoApply.cmm for vectors] in utils/genapply/Main.hs for the rationale.
 movInstr :: NCGConfig -> Format -> (Operand -> Operand -> Instr)
 movInstr config fmt =
   case fmt of
