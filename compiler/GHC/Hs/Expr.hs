@@ -650,7 +650,8 @@ ppr_expr :: forall p. (OutputableBndrId p)
 ppr_expr (HsVar _ (L _ v))   = pprPrefixOcc v
 ppr_expr (HsHole x)          = case ghcPass @p of
   GhcPs -> pprPrefixOcc (unLoc x)
-  _ -> panic "unused"
+  GhcRn -> dataConCantHappen x
+  GhcTc -> dataConCantHappen x
 ppr_expr (HsRecSel _ f)      = pprPrefixOcc f
 ppr_expr (HsIPVar _ v)       = ppr v
 ppr_expr (HsOverLabel s l) = case ghcPass @p of
@@ -897,7 +898,8 @@ ppr_infix_expr (HsRecSel _ f)       = Just (pprInfixOcc f)
 ppr_infix_expr (HsHole x)           = case ghcPass @p of
   GhcPs -> case x of
     (L _ v) -> Just (pprInfixOcc v)
-  _ -> panic "unused"
+  GhcRn -> dataConCantHappen x
+  GhcTc -> dataConCantHappen x
 ppr_infix_expr (XExpr x)            = case ghcPass @p of
                                         GhcRn -> ppr_infix_expr_rn x
                                         GhcTc -> ppr_infix_expr_tc x
