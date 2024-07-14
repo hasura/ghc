@@ -563,8 +563,11 @@ data HsExpr p
   -- Used with RequiredTypeArguments, e.g. fn (type (Int -> Bool))
   | HsEmbTy   (XEmbTy p)
               (LHsWcType (NoGhcTc p))
-   -- See Note [Holes]. Holes in types or expressions.
+
+   -- | Holes in expressions.
+   -- See Note [Holes in Expressions].
   | HsHole (XHole p)
+
   | XExpr       !(XXExpr p)
   -- Note [Trees That Grow] in Language.Haskell.Syntax.Extension for the
   -- general idea, and Note [Rebindable syntax and XXExprGhcRn] in GHC.Hs.Expr
@@ -763,6 +766,83 @@ exactly what we want: treat [] as a datacon when -XNoOverloadedLists, and as
 an empty ExplicitList when -XOverloadedLists.
 
 See also #13680, which requested [] @Int to work.
+
+Note [Holes in expressions]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+-- TODO: de-duplicate wrt [Holes] in GHC.Tc.Types.Constraint, refer to this note
+-- & both [Holes] at HsUnboundVarRn/Tc definitions.
+
+This Note explains how GHC tracks "holes" in expressions.  It does not
+deal with holes in types, and partial type signatures.
+
+A hole represents a missing bit of an expression. Example:
+   foo x = x && _
+GHC then emits a diagnostic, describing the bit that is left out:
+  Foo.hs:5:14: error: [GHC-88464]
+    • Found hole: _ :: Bool
+    • In the second argument of ‘(&&)’, namely ‘_’
+      In the expression: x && _
+
+The same mechanism is used to give diagnostics for out-of-scope
+variables:
+   foo x = x && _
+gives diagnostic
+  Foo.hs:5:14: error: [GHC-88464]
+    Variable not in scope: y :: Bool
+
+Here is how holes are represented in expressions:
+
+* If the user wrote "_":
+    Parser        HsHole
+    Renamer       XExpr (HsUnboundVarRn "_")
+    Typechecker   XExpr (HsUnboundVarTc ref "_")
+
+* If the user wrote "x", where `x` is not in scope
+   Parser        HsVar "x"
+   Renamer       XExpr (HsUnboundVarRn "x")
+   Typechecker   XExpr (HsUnboundVarTc ref "x")
+
+In both cases (ref::HoleExprRef) contains
+   - The type of the hole.
+   - A ref-cell that is filled in (by the typechecker) with an
+     error thunk.   With -fdefer-type errors we use this as the
+     value of the hole.
+   - A Unique (see Note [Uniques and Tags]).
+
+Typechecking holes
+
+* When the typechecker encounters a `HsUnboundVarRn`, it returns
+  a `HsUnboundVarTc`, but also emits a `DelayedError` into the `WantedConstraints`.
+
+* This DelayedError later triggers the error reporting, and the filling-in of
+  the error thunk, in GHC.Tc.Errors.
+
+* The user has the option of deferring errors until runtime with
+  `-fdefer-type-errors`. In this case, the hole carries evidence in its
+  `HoleExprRef`; is an erroring expression that prints an error and crashes at
+  runtime.
+
+Desugaring holes
+
+* During desugaring, the `(HsExpr (HsUnboundVarTc ref "x"))` is desugared by
+  reading the ref-cell to find the error thunk evidence term, put there by the
+  constraint solver.
+
+Wrinkles:
+
+* Prior to fixing #17812, we used to invent an Id to hold the erroring
+  expression, and then bind it during type-checking. But this does not support
+  representation-polymorphic out-of-scope identifiers. See
+  typecheck/should_compile/T17812. We thus use the mutable-CoreExpr approach
+  described above.
+
+* You might think that the type in the HoleExprRef is the same as the type of the
+  hole. However, because the hole type (hole_ty) is rewritten with respect to
+  givens, this might not be the case. That is, the hole_ty is always (~) to the
+  type of the HoleExprRef, but they might not be `eqType`. We need the type of the generated
+  evidence to match what is expected in the context of the hole, and so we must
+  store these types separately.
 -}
 
 

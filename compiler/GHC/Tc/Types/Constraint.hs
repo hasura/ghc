@@ -672,7 +672,10 @@ type to an ill-kinded one.
 
 Note [Holes]
 ~~~~~~~~~~~~
-This Note explains how GHC tracks *holes*.
+
+-- TODO: rewrite this note wrt the existens of Note [Holes in expressions] in Language.Haskell.Syntax.Expr
+
+This Note explains how GHC tracks *holes* in the type checker. 
 
 A hole represents one of two conditions:
  - A missing bit of an expression. Example: foo x = x + _
