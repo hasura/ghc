@@ -15,6 +15,7 @@ module GHC.Parser.String (
 
 import GHC.Prelude
 
+import Control.Arrow ((>>>))
 import Control.Monad (forM_, guard, unless, when, (>=>))
 import Data.Char (chr, isSpace, ord)
 import qualified Data.Foldable1 as Foldable1
@@ -41,35 +42,27 @@ unLexedChar (LexedChar c _) = c
 unLexedString :: LexedString loc -> String
 unLexedString = map unLexedChar
 
--- | Apply the given StringProcessors to the given LexedString left-to-right,
--- and return the processed string.
 resolveLexedString ::
   LexStringType ->
   LexedString loc ->
   Either (StringLexError loc) String
-resolveLexedString strType = fmap unLexedString . foldr (>=>) pure processString
+resolveLexedString strType = fmap unLexedString . processString
   where
     processString =
       case strType of
         StringTypeSingle ->
-          [ collapseStringGaps
-          , resolveEscapeCharacters
-          ]
+              resolveEscapeCharacters
         StringTypeMulti ->
-          [ collapseStringGaps
-          , resolveMultilineString
-          , checkInnerTabs
-          , resolveEscapeCharacters
-          ]
+              resolveMultilineString
+          >>> (\s -> checkInnerTabs s >> pure s)
+          >=> resolveEscapeCharacters
 
 data StringLexError loc
   = SmartQuoteError !Char !loc
   | StringLexError !Char !loc !LexErr
 
-type StringProcessor loc = LexedString loc -> Either (StringLexError loc) (LexedString loc)
-
-collapseStringGaps :: StringProcessor loc
-collapseStringGaps s0 = pure (go s0)
+collapseStringGaps :: LexedString loc -> LexedString loc
+collapseStringGaps s0 = go s0
   where
     go = \case
       [] -> []
@@ -86,7 +79,7 @@ collapseStringGaps s0 = pure (go s0)
 
       c : s -> c : go s
 
-resolveEscapeCharacters :: StringProcessor loc
+resolveEscapeCharacters :: LexedString loc -> Either (StringLexError loc) (LexedString loc)
 resolveEscapeCharacters = go
   where
     go = \case
@@ -216,11 +209,10 @@ parseLongEscape (LexedChar c _) s = listToMaybe $ mapMaybe tryParse longEscapeCo
 -- have to allow them in multiline strings for leading indentation. So
 -- we allow them in the initial lexing pass, then check for any remaining
 -- tabs after replacing leading tabs in resolveMultilineString.
-checkInnerTabs :: StringProcessor loc
-checkInnerTabs s = do
+checkInnerTabs :: LexedString loc -> Either (StringLexError loc) ()
+checkInnerTabs s =
   forM_ s $ \(LexedChar c loc) ->
     when (c == '\t') $ Left $ StringLexError c loc LexStringCharLit
-  pure s
 
 -- -----------------------------------------------------------------------------
 -- Unicode Smart Quote detection (#21843)
@@ -301,22 +293,22 @@ splitLines =
     emptyLine = LexedLine [] Nothing
 
 joinLines :: [LexedLine loc] -> LexedString loc
-joinLines = concatMap (\(LexedLine line nl) -> line ++ maybeToList (LexedChar '\n' <$> nl))
+joinLines = concatMap $ \(LexedLine line nl) ->
+  case nl of
+    Nothing -> line
+    Just nl' -> line ++ [LexedChar '\n' nl']
 
 -- | See Note [Multiline string literals]
-resolveMultilineString :: StringProcessor loc
-resolveMultilineString = pure . process
+resolveMultilineString :: LexedString loc -> LexedString loc
+resolveMultilineString = process
   where
-    (.>) :: (a -> b) -> (b -> c) -> (a -> c)
-    (.>) = flip (.)
-
     process =
-         splitLines
-      .> convertLeadingTabs
-      .> rmCommonWhitespacePrefix
-      .> stripOnlyWhitespace
-      .> joinLines
-      .> rmFirstNewline
+          splitLines
+      >>> convertLeadingTabs
+      >>> rmCommonWhitespacePrefix
+      >>> stripOnlyWhitespace
+      >>> joinLines
+      >>> rmFirstNewline
 
     convertLeadingTabs =
       let convertLine col = \case

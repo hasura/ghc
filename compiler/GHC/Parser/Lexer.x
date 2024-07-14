@@ -2256,7 +2256,7 @@ lex_string strType = do
             '\\' -> do
               case alexGetChar' i1 of
                 Just (c1, i2)
-                  | is_space c1 -> lexStringGap (LexedChar c1 i1 : acc1) i2
+                  | is_space c1 -> lexStringGap acc0 i2
                   | otherwise -> lexString (LexedChar c1 i1 : acc1) i2
                 Nothing -> Left (LexStringCharLit, acc, i1)
             _ | isAny c0 -> lexString acc1 i1
@@ -2279,11 +2279,10 @@ lex_string strType = do
     lexStringGap acc0 i0 = do
       let acc = reverse acc0
       case alexGetChar' i0 of
-        Just (c0, i1) -> do
-          let acc1 = LexedChar c0 i0 : acc0
+        Just (c0, i1) ->
           case c0 of
-            '\\' -> lexString acc1 i1
-            _ | is_space c0 -> lexStringGap acc1 i1
+            '\\' -> lexString acc0 i1
+            _ | is_space c0 -> lexStringGap acc0 i1
             _ -> Left (LexStringCharLit, acc, i0)
         Nothing -> Left (LexStringCharLitEOF, acc, i0)
 
