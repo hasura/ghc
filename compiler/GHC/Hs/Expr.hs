@@ -369,7 +369,7 @@ type instance XEmbTy         GhcTc = DataConCantHappen
   -- Valid usages are immediately desugared into Type.
 
 
-type instance XHole          GhcPs = LocatedN RdrName
+type instance XHole          GhcPs = SrcSpanAnnN
 -- After renaming holes are handled using HsUnboundVarRn/HsUnboundVarTc:
 type instance XHole          GhcRn = DataConCantHappen
 type instance XHole          GhcTc = DataConCantHappen
@@ -649,7 +649,7 @@ ppr_expr :: forall p. (OutputableBndrId p)
          => HsExpr (GhcPass p) -> SDoc
 ppr_expr (HsVar _ (L _ v))   = pprPrefixOcc v
 ppr_expr (HsHole x)          = case ghcPass @p of
-  GhcPs -> pprPrefixOcc (unLoc x)
+  GhcPs -> pprPrefixOcc (mkUnqual varName (fsLit "_"))
   GhcRn -> dataConCantHappen x
   GhcTc -> dataConCantHappen x
 ppr_expr (HsRecSel _ f)      = pprPrefixOcc f
@@ -896,8 +896,7 @@ ppr_infix_expr :: forall p. (OutputableBndrId p) => HsExpr (GhcPass p) -> Maybe 
 ppr_infix_expr (HsVar _ (L _ v))    = Just (pprInfixOcc v)
 ppr_infix_expr (HsRecSel _ f)       = Just (pprInfixOcc f)
 ppr_infix_expr (HsHole x)           = case ghcPass @p of
-  GhcPs -> case x of
-    (L _ v) -> Just (pprInfixOcc v)
+  GhcPs -> Just (pprInfixOcc (mkUnqual varName (fsLit "_")))
   GhcRn -> dataConCantHappen x
   GhcTc -> dataConCantHappen x
 ppr_infix_expr (XExpr x)            = case ghcPass @p of

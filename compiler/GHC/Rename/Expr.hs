@@ -353,8 +353,8 @@ rnExpr (HsVar _ (L l v))
 rnExpr (HsIPVar x v)
   = return (HsIPVar x v, emptyFVs)
 
-rnExpr (HsHole (L _ v))
-  = return (XExpr (HsUnboundVarRn v), emptyFVs)
+rnExpr (HsHole _)
+  = return (XExpr (HsUnboundVarRn (mkUnqual varName (fsLit "_"))), emptyFVs)
 
 -- HsOverLabel: see Note [Handling overloaded and rebindable constructs]
 rnExpr (HsOverLabel src v)

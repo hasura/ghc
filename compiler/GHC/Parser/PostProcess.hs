@@ -1569,7 +1569,7 @@ class DisambInfixOp b where
 instance DisambInfixOp (HsExpr GhcPs) where
   mkHsVarOpPV v = return $ L (getLoc v) (HsVar noExtField v)
   mkHsConOpPV v = return $ L (getLoc v) (HsVar noExtField v)
-  mkHsInfixHolePV v = return $ L (getLoc v) (HsHole v)
+  mkHsInfixHolePV v = return $ L (getLoc v) (HsHole (getLoc v))
 
 instance DisambInfixOp RdrName where
   mkHsConOpPV (L l v) = return $ L l v
@@ -1924,7 +1924,7 @@ instance DisambECP (HsExpr GhcPs) where
   rejectPragmaPV _                        = return ()
 
 hsHoleExprNoAnn :: HsExpr GhcPs
-hsHoleExprNoAnn = HsHole (L noSrcSpanA (mkUnqual varName (fsLit "_")))
+hsHoleExprNoAnn = HsHole noSrcSpanA
 
 instance DisambECP (PatBuilder GhcPs) where
   type Body (PatBuilder GhcPs) = PatBuilder

@@ -31,6 +31,7 @@ module ExactPrint
   , deltaOptions
   ) where
 
+import qualified GHC.Types.Name.Occurrence
 import GHC
 import GHC.Base (NonEmpty(..))
 import GHC.Core.Coercion.Axiom (Role(..))
@@ -2945,9 +2946,9 @@ instance ExactPrint (HsExpr GhcPs) where
       then markAnnotated n
       else return n
     return (HsVar x n')
-  exact (HsHole n) = do
-    n' <- markAnnotated n
-    pure (HsHole n')
+  exact (HsHole l) = do
+    (L l' _) <- markAnnotated (L l (mkUnqual GHC.Types.Name.Occurrence.varName (fsLit "_")))
+    pure (HsHole l')
   exact x@(HsOverLabel src l) = do
     printStringAtLsDelta (SameLine 0) "#"
     case src of
