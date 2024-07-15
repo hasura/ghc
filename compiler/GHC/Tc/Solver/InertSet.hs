@@ -809,6 +809,8 @@ such that
         then (f1 >= f2) implies that lhs1 does not appear within lhs2
   (WF2) if (lhs -f-> t) is in S, then t /= lhs
 
+(WF1) guarantees that S is well-defined /as a function/.
+
 Definition [Applying a generalised substitution]
 If S is a generalised substitution
    S(f,t0) = t,  if (t0 -fs-> t) in S, and fs >= f
@@ -1027,11 +1029,11 @@ Here is the scenario:
 * We further know fw >= fs. (If not, then we short-circuit via (K0).)
 
 K4 says that we may keep lhs1 -fs-> s in S if:
-  lhs1 is a tyvar AND fs >= fw
+  lhs1 is a tyvar, say a, AND fs >= fw
 
 Why K4 guarantees termination:
-  * If fs >= fw, we know a is not rewritable in t, because of (T2).
-  * We further know lhs /= a, because of (T1).
+  * If fs >= fw, we know a is not rewritable in t, because of (T2).  [work item fully rewritten]
+  * We further know lhs /= a, because of (T1).                       [ditto]
   * Accordingly, a use of the new inert item lhs -fw-> t cannot create the conditions
     for a use of a -fs-> s (precisely because t does not mention a), and hence,
     the extended substitution (with lhs -fw-> t in it) is a terminating
@@ -1552,8 +1554,8 @@ kickOutRewritableLHS ko_spec new_fr@(_, new_role)
 
     (tv_eqs_out, tv_eqs_in) = partitionInertEqs kick_out_eq tv_eqs
     (feqs_out,   feqs_in)   = partitionFunEqs   kick_out_eq funeqmap
-    (dicts_out,  dicts_in)  = partitionDicts    (kick_out_ct . CDictCan) dictmap
-    (irs_out,    irs_in)    = partitionBag      (kick_out_ct . CIrredCan) irreds
+    (dicts_out,  dicts_in)  = partitionDicts    (kick_out_non_eq . CDictCan) dictmap
+    (irs_out,    irs_in)    = partitionBag      (kick_out_non_eq . CIrredCan) irreds
       -- Kick out even insolubles: See Note [Rewrite insolubles]
       -- Of course we must kick out irreducibles like (c a), in case
       -- we can rewrite 'c' to something more useful
@@ -1569,80 +1571,96 @@ kickOutRewritableLHS ko_spec new_fr@(_, new_role)
        = ([], old_insts)
     kick_out_qci qci
       | let ev = qci_ev qci
-      , fr_can_rewrite_ty NomEq (ctEvPred (qci_ev qci))
+      , fr_can_rewrite_ty lookEverywhere NomEq (ctEvPred (qci_ev qci))
       = Left (mkNonCanonical ev)
       | otherwise
       = Right qci
 
-    fr_tv_can_rewrite_ty :: (TyVar -> Bool) -> EqRel -> Type -> Bool
-    fr_tv_can_rewrite_ty ok_tv role ty
+    lookEverywhere, lookOnlyUnderFamApps :: UnderFam
+    lookEverywhere       = False
+    lookOnlyUnderFamApps = True
+
+    fr_tv_can_rewrite_ty :: UnderFam -> (TyVar -> Bool) -> EqRel -> Type -> Bool
+    -- UnderFam = True <=> look only under type-family applications
+    fr_tv_can_rewrite_ty look_under_famapp_only check_tv role ty
       = anyRewritableTyVar role can_rewrite ty
       where
-        can_rewrite :: EqRel -> TyVar -> Bool
-        can_rewrite old_role tv = new_role `eqCanRewrite` old_role && ok_tv tv
+        can_rewrite :: UnderFam -> EqRel -> TyVar -> Bool
+        can_rewrite is_under_famapp old_role tv
+           = (not look_under_famapp_only || is_under_famapp) &&
+             new_role `eqCanRewrite` old_role && check_tv tv
 
-    fr_tf_can_rewrite_ty :: TyCon -> [TcType] -> EqRel -> Type -> Bool
-    fr_tf_can_rewrite_ty new_tf new_tf_args role ty
+    fr_tf_can_rewrite_ty :: UnderFam -> TyCon -> [TcType] -> EqRel -> Type -> Bool
+    -- UnderFam = True <=> look only under type-family applications
+    fr_tf_can_rewrite_ty look_under_famapp_only new_tf new_tf_args role ty
       = anyRewritableTyFamApp role can_rewrite ty
       where
-        can_rewrite :: EqRel -> TyCon -> [TcType] -> Bool
-        can_rewrite old_role old_tf old_tf_args
-          = new_role `eqCanRewrite` old_role &&
+        can_rewrite :: UnderFam -> EqRel -> TyCon -> [TcType] -> Bool
+        can_rewrite is_under_famapp old_role old_tf old_tf_args
+          = (not look_under_famapp_only || is_under_famapp) &&
+            new_role `eqCanRewrite` old_role &&
             tcEqTyConApps new_tf new_tf_args old_tf old_tf_args
               -- it's possible for old_tf_args to have too many. This is fine;
               -- we'll only check what we need to.
 
     {-# INLINE fr_can_rewrite_ty #-}   -- Perform case analysis on ko_spec only once
-    fr_can_rewrite_ty :: EqRel -> Type -> Bool
-    fr_can_rewrite_ty = case ko_spec of  -- See Note [KickOutSpec]
-      KOAfterUnify tvs                    -> fr_tv_can_rewrite_ty (`elemVarSet` tvs)
-      KOAfterAdding (TyVarLHS tv)         -> fr_tv_can_rewrite_ty (== tv)
-      KOAfterAdding (TyFamLHS tf tf_args) -> fr_tf_can_rewrite_ty tf tf_args
+    fr_can_rewrite_ty :: UnderFam -> EqRel -> Type -> Bool
+    -- UnderFam = True <=> look only under type-family applications
+    fr_can_rewrite_ty uf = case ko_spec of  -- See Note [KickOutSpec]
+      KOAfterUnify tvs                    -> fr_tv_can_rewrite_ty uf (`elemVarSet` tvs)
+      KOAfterAdding (TyVarLHS tv)         -> fr_tv_can_rewrite_ty uf (== tv)
+      KOAfterAdding (TyFamLHS tf tf_args) -> fr_tf_can_rewrite_ty uf tf tf_args
 
     fr_may_rewrite :: CtFlavourRole -> Bool
     fr_may_rewrite fs = new_fr `eqCanRewriteFR` fs
         -- Can the new item rewrite the inert item?
 
-    kick_out_ct :: Ct -> Bool
+    kick_out_dict :: DictCt -> Bool
     -- Kick it out if the new CEqCan can rewrite the inert one
     -- See Note [kickOutRewritable]
-    kick_out_ct ct = fr_may_rewrite fs && fr_can_rewrite_ty role (ctPred ct)
+    kick_out_dict (DictCt { di_tys = tys, di_ev = ev })
+      =  fr_may_rewrite fs
+      && any (fr_can_rewrite_ty lookEverywhere NomEq) tys
       where
-        fs@(_,role) = ctFlavourRole ct
+        fs = (ctEvFlavour ev, NomEq)
+
+    kick_out_irred :: IrredCt -> Bool
+    kick_out_irred (IrredCt }{ 
+      =  fr_may_rewrite fs
+      && any (fr_can_rewrite_ty lookEverywhere NomEq) tys
+      where
+        fs = (ctEvFlavour ev, NomEq)
 
     -- Implements criteria K1-K3 in Note [Extending the inert equalities]
     kick_out_eq :: EqCt -> Bool
     kick_out_eq (EqCt { eq_lhs = lhs, eq_rhs = rhs_ty
                       , eq_ev = ev, eq_eq_rel = eq_rel })
       | not (fr_may_rewrite fs)
-      = False  -- (K0) Keep it in the inert set if the new thing can't rewrite it
+      = False  -- (KK0) Keep it in the inert set if the new thing can't rewrite it
 
       -- Below here (fr_may_rewrite fs) is True
 
-      | TyVarLHS _ <- lhs
-      , fs `eqCanRewriteFR` new_fr
-      = False  -- (K4) Keep it in the inert set if the LHS is a tyvar and
-               -- it can rewrite the work item. See Note [K4]
-
-      | fr_can_rewrite_ty eq_rel (canEqLHSType lhs)
-      = True   -- (K1)
+      -- (KK1)
+      | fr_can_rewrite_ty lookEverywhere eq_rel (canEqLHSType lhs)
+      = True   -- (KK1)
          -- The above check redundantly checks the role & flavour,
          -- but it's very convenient
 
-      | kick_out_for_inertness    = True   -- (K2)
-      | kick_out_for_completeness = True   -- (K3)
-      | otherwise                 = False
+      -- (KK2)
+      | fs `eqCanRewriteFR` fs   -- Always true... ToDo?
+      , fr_can_rewrite_ty lookOnlyUnderFamApps eq_rel rhs_ty
+      = True
+
+      -- (KK3)
+      | case eq_rel of
+              NomEq  -> is_new_lhs      rhs_ty   -- (KK3a)
+              ReprEq -> head_is_new_lhs rhs_ty   -- (KK3b)
+      = True
+
+      | otherwise = False
 
       where
         fs = (ctEvFlavour ev, eq_rel)
-        kick_out_for_inertness
-          =    (fs `eqCanRewriteFR` fs)           -- (K2a)
-            && fr_can_rewrite_ty eq_rel rhs_ty    -- (K2b)
-
-        kick_out_for_completeness  -- (K3) and Note [K3: completeness of solving]
-          = case eq_rel of
-              NomEq  -> is_new_lhs      rhs_ty   -- (K3a)
-              ReprEq -> head_is_new_lhs rhs_ty   -- (K3b)
 
     is_new_lhs :: Type -> Bool
     is_new_lhs = case ko_spec of   -- See Note [KickOutSpec]
