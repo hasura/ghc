@@ -1554,8 +1554,8 @@ kickOutRewritableLHS ko_spec new_fr@(_, new_role)
 
     (tv_eqs_out, tv_eqs_in) = partitionInertEqs kick_out_eq tv_eqs
     (feqs_out,   feqs_in)   = partitionFunEqs   kick_out_eq funeqmap
-    (dicts_out,  dicts_in)  = partitionDicts    (kick_out_non_eq . CDictCan) dictmap
-    (irs_out,    irs_in)    = partitionBag      (kick_out_non_eq . CIrredCan) irreds
+    (dicts_out,  dicts_in)  = partitionDicts    kick_out_dict dictmap
+    (irs_out,    irs_in)    = partitionBag      kick_out_irred irreds
       -- Kick out even insolubles: See Note [Rewrite insolubles]
       -- Of course we must kick out irreducibles like (c a), in case
       -- we can rewrite 'c' to something more useful
@@ -1581,7 +1581,6 @@ kickOutRewritableLHS ko_spec new_fr@(_, new_role)
     lookOnlyUnderFamApps = True
 
     fr_tv_can_rewrite_ty :: UnderFam -> (TyVar -> Bool) -> EqRel -> Type -> Bool
-    -- UnderFam = True <=> look only under type-family applications
     fr_tv_can_rewrite_ty look_under_famapp_only check_tv role ty
       = anyRewritableTyVar role can_rewrite ty
       where
@@ -1591,7 +1590,6 @@ kickOutRewritableLHS ko_spec new_fr@(_, new_role)
              new_role `eqCanRewrite` old_role && check_tv tv
 
     fr_tf_can_rewrite_ty :: UnderFam -> TyCon -> [TcType] -> EqRel -> Type -> Bool
-    -- UnderFam = True <=> look only under type-family applications
     fr_tf_can_rewrite_ty look_under_famapp_only new_tf new_tf_args role ty
       = anyRewritableTyFamApp role can_rewrite ty
       where
@@ -1619,17 +1617,16 @@ kickOutRewritableLHS ko_spec new_fr@(_, new_role)
     -- Kick it out if the new CEqCan can rewrite the inert one
     -- See Note [kickOutRewritable]
     kick_out_dict (DictCt { di_tys = tys, di_ev = ev })
-      =  fr_may_rewrite fs
+      =  fr_may_rewrite (ctEvFlavour ev, NomEq)
       && any (fr_can_rewrite_ty lookEverywhere NomEq) tys
-      where
-        fs = (ctEvFlavour ev, NomEq)
 
     kick_out_irred :: IrredCt -> Bool
-    kick_out_irred (IrredCt }{ 
-      =  fr_may_rewrite fs
-      && any (fr_can_rewrite_ty lookEverywhere NomEq) tys
+    kick_out_irred (IrredCt { ir_ev = ev })
+      =  fr_may_rewrite (ctEvFlavour ev, eq_rel)
+      && fr_can_rewrite_ty lookEverywhere eq_rel pred
       where
-        fs = (ctEvFlavour ev, NomEq)
+       pred   = ctEvPred ev
+       eq_rel = predTypeEqRel pred
 
     -- Implements criteria K1-K3 in Note [Extending the inert equalities]
     kick_out_eq :: EqCt -> Bool

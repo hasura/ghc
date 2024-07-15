@@ -225,7 +225,7 @@ data DictCt   -- e.g.  Num ty
 dictCtEvidence :: DictCt -> CtEvidence
 dictCtEvidence = di_ev
 
-dictCtPred :: DictCt -> CtEvidence
+dictCtPred :: DictCt -> TcPredType
 dictCtPred (DictCt { di_cls = cls, di_tys = tys }) = mkClassPred cls tys
 
 instance Outputable DictCt where
@@ -2048,9 +2048,7 @@ ctEvRewriteEqRel :: CtEvidence -> EqRel
 -- ^ Return the rewrite-role of an abitrary CtEvidence
 -- See Note [The rewrite-role of a constraint]
 -- We return ReprEq for (a ~R# b) and NomEq for all other preds
-ctEvRewriteEqRel ev
-  | isReprEqPrimPred (ctEvPred ev) = ReprEq
-  | otherwise                      = NomEq
+ctEvRewriteEqRel = predTypeEqRel . ctEvPred
 
 ctEvTerm :: CtEvidence -> EvTerm
 ctEvTerm ev = EvExpr (ctEvExpr ev)

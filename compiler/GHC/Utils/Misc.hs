@@ -649,13 +649,12 @@ all2 :: (a -> b -> Bool) -> [a] -> [b] -> Bool
 -- True if the lists are the same length, and
 -- all corresponding elements satisfy the predicate
 all2 _ []     []     = True
-
 all2 p (x:xs) (y:ys) = p x y && all2 p xs ys
 all2 _ _      _      = False
 
 any2 :: (a -> b -> Bool) -> [a] -> [b] -> Bool
 -- True if any of the corresponding elements satisfy the predicate
--- Unlike `any2`, this ignores excess elements of the other list
+-- Unlike `all2`, this ignores excess elements of the other list
 any2 p (x:xs) (y:ys) = p x y || all2 p xs ys
 any2 _ _      _      = False
 
