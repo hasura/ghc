@@ -1585,21 +1585,21 @@ kickOutRewritableLHS ko_spec new_fr@(_, new_role)
     lookOnlyUnderFamApps = True
 
     fr_tv_can_rewrite_ty :: UnderFam -> (TyVar -> Bool) -> EqRel -> Type -> Bool
-    fr_tv_can_rewrite_ty look_under_famapp_only check_tv role ty
+    fr_tv_can_rewrite_ty look_only_under_famapp check_tv role ty
       = anyRewritableTyVar role can_rewrite ty
       where
         can_rewrite :: UnderFam -> EqRel -> TyVar -> Bool
         can_rewrite is_under_famapp old_role tv
-           = (not look_under_famapp_only || is_under_famapp) &&
+           = (not look_only_under_famapp || is_under_famapp) &&
              new_role `eqCanRewrite` old_role && check_tv tv
 
     fr_tf_can_rewrite_ty :: UnderFam -> TyCon -> [TcType] -> EqRel -> Type -> Bool
-    fr_tf_can_rewrite_ty look_under_famapp_only new_tf new_tf_args role ty
+    fr_tf_can_rewrite_ty look_only_under_famapp new_tf new_tf_args role ty
       = anyRewritableTyFamApp role can_rewrite ty
       where
         can_rewrite :: UnderFam -> EqRel -> TyCon -> [TcType] -> Bool
         can_rewrite is_under_famapp old_role old_tf old_tf_args
-          = (not look_under_famapp_only || is_under_famapp) &&
+          = (not look_only_under_famapp || is_under_famapp) &&
             new_role `eqCanRewrite` old_role &&
             tcEqTyConApps new_tf new_tf_args old_tf old_tf_args
               -- it's possible for old_tf_args to have too many. This is fine;
@@ -1655,7 +1655,8 @@ kickOutRewritableLHS ko_spec new_fr@(_, new_role)
       = True
 
       -- (KK3)
-      | case eq_rel of
+      | not (fs `eqCanRewriteFR` new_fr)   -- NEW and very important to avoid excessive kick out
+      , case eq_rel of
               NomEq  -> is_new_lhs      rhs_ty   -- (KK3a)
               ReprEq -> head_is_new_lhs rhs_ty   -- (KK3b)
       = True
