@@ -655,7 +655,7 @@ all2 _ _      _      = False
 any2 :: (a -> b -> Bool) -> [a] -> [b] -> Bool
 -- True if any of the corresponding elements satisfy the predicate
 -- Unlike `all2`, this ignores excess elements of the other list
-any2 p (x:xs) (y:ys) = p x y || all2 p xs ys
+any2 p (x:xs) (y:ys) = p x y || any2 p xs ys
 any2 _ _      _      = False
 
 -- Count the number of times a predicate is true

@@ -1012,21 +1012,26 @@ any_rewritable :: EqRel   -- Ambient role
 --
 -- See Note [Rewritable] in GHC.Tc.Solver.InertSet for a specification for this function.
 {-# INLINE any_rewritable #-} -- this allows specialization of predicates
-any_rewritable role tv_pred tc_pred
-  = go False emptyVarSet role
+any_rewritable role tv_pred tc_pred ty
+  = go False emptyVarSet role ty
   where
     go_tv uf bvs rl tv | tv `elemVarSet` bvs = False
                        | otherwise           = tv_pred uf rl tv
 
     go :: UnderFam -> VarSet -> EqRel -> TcType -> Bool
-    go under_fam bvs rl ty@(TyConApp tc tys)
-      | isFamFreeTyCon tc    -- Not a type family, not a synonym hiding type families
-      = go_tc under_fam bvs rl tc tys
+    go under_fam bvs rl (TyConApp tc tys)
 
-      | Just ty' <- coreView ty   -- Expand synonyms
+      -- Expand synonyms, unless (a) we are at Nominal role and (b) the synonym
+      -- is type-family-free; then it suffices just to look at the args
+      | isTypeSynonymTyCon tc
+      , case rl of { NomEq -> not (isFamFreeTyCon tc); ReprEq -> True }
+      , Just ty' <- expandSynTyConApp_maybe tc tys
       = go under_fam bvs rl ty'
 
-      | isTypeFamilyTyCon tc
+      -- Check if we are going under a type family application
+      | case rl of
+           NomEq  -> isTypeFamilyTyCon tc
+           ReprEq -> isFamilyTyCon     tc
       = if | tc_pred under_fam rl tc tys -> True
            | otherwise                   -> go_fam under_fam (tyConArity tc) bvs tys
 
@@ -1048,12 +1053,12 @@ any_rewritable role tv_pred tc_pred
     go_tc uf bvs NomEq  _  tys = any (go uf bvs NomEq) tys
     go_tc uf bvs ReprEq tc tys = any2 (go_arg uf bvs) tys (tyConRoleListRepresentational tc)
 
-    go_arg uf bvs ty Nominal          = go uf bvs NomEq  ty
+    go_arg uf bvs ty Nominal          = go uf bvs NomEq ty
     go_arg uf bvs ty Representational = go uf bvs ReprEq ty
     go_arg _   _  _  Phantom          = False  -- We never rewrite with phantoms
 
-    -- For a type-family application (F t1 .. tn), all arguments have Nominal role
-    --   (whether in F's arity or, if over-saturated, beyond it)
+    -- For a type-family or data-family application (F t1 .. tn), all arguments
+    --   have Nominal role (whether in F's arity or, if over-saturated, beyond it)
     -- Switch on under_fam for arguments <= arity
     go_fam uf 0 bvs tys      = any (go uf bvs NomEq) tys   -- Like AppTy
     go_fam _  _ _   []       = False

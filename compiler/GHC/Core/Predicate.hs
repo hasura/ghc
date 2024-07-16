@@ -194,7 +194,7 @@ getEqPredRole ty = eqRelRole (predTypeEqRel ty)
 
 -- | Get the equality relation relevant for a pred type
 -- Returns NomEq for dictionary predicates, etc
-predTypeEqRel :: HasDebugCallStack => PredType -> EqRel
+predTypeEqRel :: PredType -> EqRel
 predTypeEqRel ty
   | isReprEqPrimPred ty = ReprEq
   | otherwise           = NomEq

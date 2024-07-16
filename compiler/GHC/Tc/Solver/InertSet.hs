@@ -1516,6 +1516,10 @@ data KickOutSpec -- See Note [KickOutSpec]
   | KOAfterAdding CanEqLHS     -- We are adding to the inert set a canonical equality
                                -- constraint with this LHS
 
+instance Outputable KickOutSpec where
+  ppr (KOAfterUnify tvs)  = text "KOAfterUnify" <> ppr tvs
+  ppr (KOAfterAdding lhs) = text "KOAfterAdding" <> parens (ppr lhs)
+
 {- Note [KickOutSpec]
 ~~~~~~~~~~~~~~~~~~~~~~
 KickOutSpec explains why we are kicking out.
@@ -1632,8 +1636,10 @@ kickOutRewritableLHS ko_spec new_fr@(_, new_role)
     kick_out_eq :: EqCt -> Bool
     kick_out_eq (EqCt { eq_lhs = lhs, eq_rhs = rhs_ty
                       , eq_ev = ev, eq_eq_rel = eq_rel })
+
+      -- (KK0) Keep it in the inert set if the new thing can't rewrite it
       | not (fr_may_rewrite fs)
-      = False  -- (KK0) Keep it in the inert set if the new thing can't rewrite it
+      = False
 
       -- Below here (fr_may_rewrite fs) is True
 
