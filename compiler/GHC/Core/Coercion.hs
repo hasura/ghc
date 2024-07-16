@@ -2496,17 +2496,18 @@ coercion_lr_kind which orig_co
     go_app co              args = piResultTys (go co) args
 
     -------------
-    go_ax (BuiltInFamRewrite  bif) cos  = check_bif_res (bifrw_proves bif (map coercionKind cos))
-    go_ax (BuiltInFamInteract bif) [co] = check_bif_res (bifint_proves bif (coercionKind co))
-    go_ax (BuiltInFamInteract {})  _    = crash
-    go_ax (UnbranchedAxiom ax)     cos  = go_branch ax (coAxiomSingleBranch ax) cos
-    go_ax (BranchedAxiom ax i)     cos  = go_branch ax (coAxiomNthBranch ax i)  cos
+    go_ax axr@(BuiltInFamRewrite  bif) cos  = check_bif_res axr (bifrw_proves bif (map coercionKind cos))
+    go_ax axr@(BuiltInFamInteract bif) [co] = check_bif_res axr (bifint_proves bif (coercionKind co))
+    go_ax axr@(BuiltInFamInteract {})  _    = crash axr
+    go_ax     (UnbranchedAxiom ax)     cos  = go_branch ax (coAxiomSingleBranch ax) cos
+    go_ax     (BranchedAxiom ax i)     cos  = go_branch ax (coAxiomNthBranch ax i)  cos
 
     -------------
-    check_bif_res (Just (Pair lhs rhs)) = pickLR which (lhs,rhs)
-    check_bif_res Nothing               = crash
+    check_bif_res _   (Just (Pair lhs rhs)) = pickLR which (lhs,rhs)
+    check_bif_res axr Nothing               = crash axr
 
-    crash = pprPanic "coercionKind" (ppr orig_co)
+    crash :: CoAxiomRule -> Type
+    crash axr = pprPanic "coercionKind" (ppr axr)
 
     -------------
     go_branch :: CoAxiom br -> CoAxBranch -> [Coercion] -> Type
