@@ -1,170 +1,277 @@
 {-# LANGUAGE LambdaCase #-}
 
 module GHC.Parser.String (
-  LexedString,
-  LexedChar (..),
   StringLexError (..),
+  ContainsSmartQuote (..),
   LexStringType (..),
-  resolveLexedString,
-  resolveEscapeCharacter,
+  lexString,
 
   -- * Unicode smart quote helpers
   isDoubleSmartQuote,
   isSingleSmartQuote,
+
+  -- * Other helpers
+  isAnyChar,
+  resolveEscapeCharacter,
 ) where
 
 import GHC.Prelude
 
 import Control.Arrow ((>>>))
-import Control.Monad (forM_, guard, unless, when, (>=>))
-import Data.Char (chr, isSpace, ord)
-import qualified Data.Foldable1 as Foldable1
-import qualified Data.List.NonEmpty as NonEmpty
-import Data.Maybe (listToMaybe, mapMaybe, maybeToList)
+import Control.Monad (guard, unless, when)
+import Data.Char (chr, isPrint, ord)
+import Data.List (unfoldr)
+import Data.Maybe (listToMaybe, mapMaybe)
 import GHC.Parser.CharClass (
   hexDigit,
+  is_any,
   is_decdigit,
   is_hexdigit,
   is_octdigit,
+  is_space,
   octDecDigit,
  )
-import GHC.Parser.Errors.Types (LexErr (..))
 import GHC.Utils.Panic (panic)
 
-data LexStringType = StringTypeSingle | StringTypeMulti deriving (Eq)
+data LexStringType = StringTypeSingle | StringTypeMulti
 
-data LexedChar loc = LexedChar !Char !loc
-type LexedString loc = [LexedChar loc]
+-- | State to accumulate while iterating through string literal.
+--
+-- Fields are strict here to avoid space leak when iterating through large string literal
+-- https://gitlab.haskell.org/ghc/ghc/-/merge_requests/12089#note_576175
+data LexStringState loc = LexStringState
+  { stringAcc :: !String
+    -- ^ The string seen so far, reversed
+  , multilineCommonWsPrefix :: !Int
+    -- ^ The common prefix for multiline strings. See Note [Multiline string literals]
+  , initialLoc :: !loc
+    -- ^ The location of the beginning of the string literal
+  }
 
-unLexedChar :: LexedChar loc -> Char
-unLexedChar (LexedChar c _) = c
+-- | Get the character at the given location, with the location
+-- of the next character. Returns Nothing if at the end of the
+-- input.
+type GetChar loc = loc -> Maybe (Char, loc)
 
-unLexedString :: LexedString loc -> String
-unLexedString = map unLexedChar
-
-resolveLexedString ::
-  LexStringType ->
-  LexedString loc ->
-  Either (StringLexError loc) String
-resolveLexedString strType = fmap unLexedString . processString
+lexString :: LexStringType -> GetChar loc -> loc -> Either (StringLexError loc) (String, loc)
+lexString strType getChar initialLoc = go initialState initialLoc
   where
-    processString =
-      case strType of
-        StringTypeSingle ->
-              resolveEscapeCharacters
-        StringTypeMulti ->
-              resolveMultilineString
-          >>> (\s -> checkInnerTabs s >> pure s)
-          >=> resolveEscapeCharacters
+    initialState =
+      LexStringState
+        { stringAcc = ""
+        , multilineCommonWsPrefix =
+            case strType of
+              StringTypeMulti -> maxBound
+              _ -> 0
+        , initialLoc = initialLoc
+        }
+
+    -- 's' is strict here to avoid space leak when iterating through large string literal
+    -- https://gitlab.haskell.org/ghc/ghc/-/merge_requests/12089#note_576175
+    go !s loc0 =
+      case getChar loc0 of
+        -- found closing delimiter
+        Just ('"', _) | Just loc1 <- checkDelimiter strType getChar loc0 -> do
+          let postprocess =
+                case strType of
+                  StringTypeSingle -> id
+                  StringTypeMulti -> postprocessMultiline (multilineCommonWsPrefix s)
+          Right (postprocess . reverse $ stringAcc s, loc1)
+
+        -- found backslash
+        Just (c0@'\\', loc1) -> do
+          case getChar loc1 of
+            -- found '\&' character, which should be elided
+            Just ('&', loc2) -> go s loc2
+            -- found start of a string gap
+            Just (c1, loc2) | is_space c1 -> collapseStringGap getChar s loc2 >>= go s
+            -- some other escape character
+            Just (c1, loc2) ->
+              case strType of
+                StringTypeSingle -> do
+                  (c', loc') <- resolveEscapeCharacter getChar loc1
+                  go (addChar c' s) loc'
+                StringTypeMulti -> do
+                  -- keep escape characters unresolved until after post-processing,
+                  -- to distinguish between a user-newline and the user writing "\n".
+                  -- but still process the characters here, to find any errors
+                  _ <- resolveEscapeCharacter getChar loc1
+                  go (addChar c1 . addChar c0 $ s) loc2
+            -- backslash at end of input
+            Nothing -> Left $ BadCharInitialLex loc1 (hasSQuote getChar s)
+
+        -- found newline character in multiline string
+        Just (c0@'\n', loc1) | StringTypeMulti <- strType ->
+          uncurry go $ parseLeadingWS getChar (addChar c0 s) loc1
+
+        -- found some other character
+        Just (c0, loc1) | isAnyChar c0 -> go (addChar c0 s) loc1
+
+        -- found some unknown character
+        Just (_, _) -> Left $ BadCharInitialLex loc0 (hasSQuote getChar s)
+
+        -- reached EOF before finding end of string
+        Nothing -> Left $ BadCharInitialLex loc0 (hasSQuote getChar s)
+
+checkDelimiter :: LexStringType -> GetChar loc -> loc -> Maybe loc
+checkDelimiter strType getChar loc0 =
+  case strType of
+    StringTypeSingle -> do
+      ('"', loc1) <- getChar loc0
+      Just loc1
+    StringTypeMulti -> do
+      ('"', loc1) <- getChar loc0
+      ('"', loc2) <- getChar loc1
+      ('"', loc3) <- getChar loc2
+      Just loc3
+
+-- | A helper for adding the given character to the lexed string.
+addChar :: Char -> LexStringState loc -> LexStringState loc
+addChar c s = s{stringAcc = c : stringAcc s}
+
+-- | Return whether the string we've parsed so far contains any smart quotes.
+hasSQuote :: GetChar loc -> LexStringState loc -> ContainsSmartQuote loc
+hasSQuote getChar s
+  | any isDoubleSmartQuote (stringAcc s)
+  , (c, loc) : _ <- filter (isDoubleSmartQuote . fst) allChars =
+      SmartQuote c loc
+  | otherwise =
+      NoSmartQuote
+  where
+    allChars = unfoldr getCharWithLoc (initialLoc s)
+    getCharWithLoc loc =
+      case getChar loc of
+        Just (c, loc') -> Just ((c, loc), loc')
+        Nothing -> Nothing
+
+-- | After parsing a backslash and a space character, consume the rest of
+-- the string gap and return the next location.
+collapseStringGap :: GetChar loc -> LexStringState loc -> loc -> Either (StringLexError loc) loc
+collapseStringGap getChar s = go
+  where
+    go loc0 =
+      case getChar loc0 of
+        Just ('\\', loc1) -> pure loc1
+        Just (c0, loc1) | is_space c0 -> go loc1
+        Just _ -> Left $ BadCharInitialLex loc0 (hasSQuote getChar s)
+        Nothing -> Left $ UnexpectedEOF loc0 (hasSQuote getChar s)
+
+-- | See Note [Multiline string literals]
+parseLeadingWS :: GetChar loc -> LexStringState loc -> loc -> (LexStringState loc, loc)
+parseLeadingWS getChar = go 0
+  where
+    go !col s loc =
+      case getChar loc of
+        Just (c@' ', loc') -> go (col + 1) (addChar c s) loc'
+        -- expand tabs
+        Just ('\t', loc') ->
+          let fill = 8 - (col `mod` 8)
+              s' = applyN fill (addChar ' ') s
+           in go (col + fill) s' loc'
+        -- if we see a newline or string delimiter, then this line only contained whitespace, so
+        -- don't include it in the common whitespace prefix
+        Just ('\n', _) -> (s, loc)
+        Just ('"', _) | Just _ <- checkDelimiter StringTypeMulti getChar loc -> (s, loc)
+        -- found some other character, so we're done parsing leading whitespace
+        _ ->
+          let s' = s{multilineCommonWsPrefix = min col (multilineCommonWsPrefix s)}
+           in (s', loc)
+
+    applyN :: Int -> (a -> a) -> a -> a
+    applyN n f x0 = iterate f x0 !! n
 
 data StringLexError loc
-  = SmartQuoteError !Char !loc
-  | StringLexError !Char !loc !LexErr
+  = UnexpectedEOF !loc !(ContainsSmartQuote loc)
+    -- ^ Unexpectedly hit EOF when lexing string
+  | BadCharInitialLex !loc !(ContainsSmartQuote loc)
+    -- ^ Found invalid character when initially lexing string
+  | EscapeBadChar !loc
+    -- ^ Found invalid character when parsing an escaped character
+  | EscapeUnexpectedEOF !loc
+    -- ^ Unexpectedly hit EOF when parsing an escaped character
+  | EscapeNumRangeError !loc
+    -- ^ Escaped number exceeds range
+  | EscapeSmartQuoteError !Char !loc
+    -- ^ Found escaped smart unicode chars as `\’` or `\”`
+  deriving (Show)
 
-collapseStringGaps :: LexedString loc -> LexedString loc
-collapseStringGaps s0 = go s0
-  where
-    go = \case
-      [] -> []
+-- | When initially lexing the string, we want to track if we've
+-- seen a smart quote, to show a helpful "you might be accidentally
+-- using a smart quote" error.
+data ContainsSmartQuote loc
+  = NoSmartQuote
+  | SmartQuote !Char !loc
+  deriving (Show)
 
-      backslash@(LexedChar '\\' _) : c : s
-        | isLexedSpace c ->
-            -- lexer should have validated that this is a valid gap,
-            -- so we'll panic if we find any invalid characters
-            case dropWhile isLexedSpace s of
-              LexedChar '\\' _ : s -> go s
-              _ -> panic $ "Invalid string gap in " ++ show (unLexedString s0)
-        | otherwise ->
-            backslash : c : go s
+-- -----------------------------------------------------------------------------
+-- Escape characters
 
-      c : s -> c : go s
-
-resolveEscapeCharacters :: LexedString loc -> Either (StringLexError loc) (LexedString loc)
-resolveEscapeCharacters = go
-  where
-    go = \case
-      [] -> pure []
-      LexedChar '\\' _ : LexedChar '&' _ : s -> go s
-      backslashChar@(LexedChar '\\' _) : s -> do
-        (c, s') <- resolveEscapeCharacter backslashChar s
-        (c :) <$> go s'
-      c : s ->
-        (c :) <$> go s
-
--- | After finding a backslash, parse the rest of the escape character.
-resolveEscapeCharacter ::
-  LexedChar loc ->   -- the backslash character
-  LexedString loc -> -- the rest of the string to parse
-  Either
-    (StringLexError loc)
-    (LexedChar loc, LexedString loc) -- the resolved escape character and the rest of the string
-resolveEscapeCharacter backslashChar s0 = do
-  (firstChar@(LexedChar c loc), s1) <- expectNext backslashChar s0
-  let rewrap c' = pure (LexedChar c' loc, s1)
-  case c of
-    'a'  -> rewrap '\a'
-    'b'  -> rewrap '\b'
-    'f'  -> rewrap '\f'
-    'n'  -> rewrap '\n'
-    'r'  -> rewrap '\r'
-    't'  -> rewrap '\t'
-    'v'  -> rewrap '\v'
-    '\\' -> rewrap '\\'
-    '"'  -> rewrap '\"'
-    '\'' -> rewrap '\''
+-- | After finding a backslash, parse the rest of the escape character, starting
+-- at the given location.
+resolveEscapeCharacter :: GetChar loc -> loc -> Either (StringLexError loc) (Char, loc)
+resolveEscapeCharacter getChar loc0 = do
+  (c0, loc1) <- expectChar loc0
+  case c0 of
+    'a'  -> pure ('\a', loc1)
+    'b'  -> pure ('\b', loc1)
+    'f'  -> pure ('\f', loc1)
+    'n'  -> pure ('\n', loc1)
+    'r'  -> pure ('\r', loc1)
+    't'  -> pure ('\t', loc1)
+    'v'  -> pure ('\v', loc1)
+    '\\' -> pure ('\\', loc1)
+    '"'  -> pure ('\"', loc1)
+    '\'' -> pure ('\'', loc1)
     -- escape codes
-    'x' -> expectNum is_hexdigit 16 hexDigit (firstChar, s1)
-    'o' -> expectNum is_octdigit 8 octDecDigit (firstChar, s1)
-    _ | is_decdigit c -> expectNum is_decdigit 10 octDecDigit (backslashChar, s0)
+    'x' -> expectNum is_hexdigit 16 hexDigit loc1
+    'o' -> expectNum is_octdigit 8 octDecDigit loc1
+    _ | is_decdigit c0 -> expectNum is_decdigit 10 octDecDigit loc0
     -- control characters (e.g. '\^M')
     '^' -> do
-      (LexedChar c1 loc1, s2) <- expectNext firstChar s1
-      unless (c1 >= '@' && c1 <= '_') $
-        Left $ StringLexError c1 loc1 LexStringCharLit
-      let c' = chr $ ord c1 - ord '@'
-      pure (LexedChar c' loc, s2)
+      (c1, loc2) <- expectChar loc1
+      unless ('@' <= c1 && c1 <= '_') $ Left $ EscapeBadChar loc1
+      pure (chr $ ord c1 - ord '@', loc2)
     -- long form escapes (e.g. '\NUL')
-    _ | Just (c', s2) <- parseLongEscape firstChar s1 -> pure (LexedChar c' loc, s2)
+    _ | Just (c1, loc2) <- parseLongEscape getChar c0 loc1 -> pure (c1, loc2)
     -- check unicode smart quotes (#21843)
-    _ | isDoubleSmartQuote c -> Left $ SmartQuoteError c loc
-    _ | isSingleSmartQuote c -> Left $ SmartQuoteError c loc
+    _ | isDoubleSmartQuote c0 -> Left $ EscapeSmartQuoteError c0 loc0
+    _ | isSingleSmartQuote c0 -> Left $ EscapeSmartQuoteError c0 loc0
     -- unknown escape
-    _ -> Left $ StringLexError c loc LexStringCharLit
+    _ -> Left $ EscapeBadChar loc0
   where
-    expectNext lastChar = \case
-      [] -> do
-        let LexedChar c loc = lastChar
-        Left $ StringLexError c loc LexStringCharLitEOF
-      c : cs -> pure (c, cs)
+    expectChar loc =
+      case getChar loc of
+        Just x -> pure x
+        Nothing -> Left $ EscapeUnexpectedEOF loc
 
-    expectNum isDigit base toDigit (lastChar, s0) = do
-      (LexedChar c loc, s1) <- expectNext lastChar s0
-      unless (isDigit c) $ Left $ StringLexError c loc LexStringCharLit
-      let parseNum x = \case
-            LexedChar c' loc' : s' | isDigit c' -> do
-              let x' = x * base + toDigit c'
-              when (x' > 0x10ffff) $ Left $ StringLexError c' loc' LexNumEscapeRange
-              parseNum x' s'
-            s ->
-              pure (LexedChar (chr x) loc, s)
-      parseNum (toDigit c) s1
+    expectNum isDigit base toDigit loc1 = do
+      (c1, loc2) <- expectChar loc1
+      unless (isDigit c1) $ Left $ EscapeBadChar loc1
+      let parseNum x loc =
+            case getChar loc of
+              Just (c, loc') | isDigit c -> do
+                let x' = x * base + toDigit c
+                when (x' > 0x10ffff) $ Left $ EscapeNumRangeError loc
+                parseNum x' loc'
+              _ ->
+                pure (chr x, loc)
+      parseNum (toDigit c1) loc2
 
--- | Check if the escape characters match a long escape code.
---
--- >>> parseLongEscape 'C' [LexedChar 'R', LexedChar 'X', ...s] = Just ('\CR', [LexedChar 'X', ...s])
--- >>> parseLongEscape 'X' [LexedChar 'X', LexedChar 'X', ...s] = Nothing
-parseLongEscape :: LexedChar loc -> LexedString loc -> Maybe (Char, LexedString loc)
-parseLongEscape (LexedChar c _) s = listToMaybe $ mapMaybe tryParse longEscapeCodes
+parseLongEscape :: GetChar loc -> Char -> loc -> Maybe (Char, loc)
+parseLongEscape getChar c0 loc1 = listToMaybe $ mapMaybe tryParse longEscapeCodes
   where
-    tryParse (prefix, c') = do
+    tryParse (prefix, c) = do
       p0 : p <- pure prefix
-      guard (p0 == c)       -- see if the first character matches
-      s' <- parsePrefix p s -- see if the rest of the prefix matches
-      pure (c', s')
+      guard (p0 == c0)          -- see if the first character matches
+      loc <- parsePrefix loc1 p -- see if the rest of the prefix matches
+      pure (c, loc)
 
-    parsePrefix (p : ps) (LexedChar t _ : ts) | p == t = parsePrefix ps ts
-    parsePrefix [] s' = Just s' -- we've matched the whole prefix, return the rest
-    parsePrefix _ _ = Nothing
+    parsePrefix loc = \case
+      [] -> pure loc
+      p : ps -> do
+        (c, loc') <- getChar loc
+        guard (p == c)
+        parsePrefix loc' ps
 
     longEscapeCodes =
       [ ("NUL", '\NUL')
@@ -203,17 +310,6 @@ parseLongEscape (LexedChar c _) s = listToMaybe $ mapMaybe tryParse longEscapeCo
       , ("DEL", '\DEL')
       ]
 
--- | Error if string contains any tab characters.
---
--- Normal strings don't lex tab characters in the first place, but we
--- have to allow them in multiline strings for leading indentation. So
--- we allow them in the initial lexing pass, then check for any remaining
--- tabs after replacing leading tabs in resolveMultilineString.
-checkInnerTabs :: LexedString loc -> Either (StringLexError loc) ()
-checkInnerTabs s =
-  forM_ s $ \(LexedChar c loc) ->
-    when (c == '\t') $ Left $ StringLexError c loc LexStringCharLit
-
 -- -----------------------------------------------------------------------------
 -- Unicode Smart Quote detection (#21843)
 
@@ -242,7 +338,7 @@ is, HsMultilineString will contain the post-processed string. This matches
 the same behavior as HsString, which contains the normalized string
 (see Note [Literal source text]).
 
-The string is post-processed with the following steps:
+The canonical steps for post processing a multiline string are:
 1. Collapse string gaps
 2. Split the string by newlines
 3. Convert leading tabs into spaces
@@ -252,6 +348,17 @@ The string is post-processed with the following steps:
 6. Join the string back with `\n` delimiters
 7. If the first character of the string is a newline, remove it
 8. Interpret escaped characters
+
+However, for performance reasons, we do as much of this in one pass as possible:
+1. As we lex the string, do the following steps as they appear:
+    a. Collapse string gaps
+    b. Keep track of the common whitespace prefix so far
+    c. Validate escaped characters
+2. At the very end, post process the lexed string:
+    a. Remove the common whitespace prefix from every line
+    b. Remove all whitespace from all-whitespace lines
+    c. Remove initial newline character
+    d. Resolve escaped characters
 
 The common whitespace prefix can be informally defined as "The longest
 prefix of whitespace shared by all lines in the string, excluding the
@@ -267,83 +374,67 @@ It's more precisely defined with the following algorithm:
 3. Calculate the longest prefix of whitespace shared by all lines in the remaining list
 -}
 
--- | A lexed line, with the string and the location info of the ending newline
--- character, if one exists
-data LexedLine loc = LexedLine !(LexedString loc) (Maybe loc)
-
-mapLine :: (LexedString loc -> LexedString loc) -> LexedLine loc -> LexedLine loc
-mapLine f (LexedLine line nl) = LexedLine (f line) nl
-
-mapLines :: (LexedString loc -> LexedString loc) -> [LexedLine loc] -> [LexedLine loc]
-mapLines f = map (mapLine f)
-
-filterLines :: (LexedString loc -> Bool) -> [LexedLine loc] -> [LexedLine loc]
-filterLines f = filter (\(LexedLine line _) -> f line)
-
-splitLines :: LexedString loc -> [LexedLine loc]
-splitLines =
-  foldr
-    ( curry $ \case
-        (LexedChar '\n' loc, ls) -> LexedLine [] (Just loc) : ls
-        (c, l : ls) -> mapLine (c :) l : ls
-        (c, []) -> LexedLine [c] Nothing : [] -- should not happen
-    )
-    [emptyLine]
-  where
-    emptyLine = LexedLine [] Nothing
-
-joinLines :: [LexedLine loc] -> LexedString loc
-joinLines = concatMap $ \(LexedLine line nl) ->
-  case nl of
-    Nothing -> line
-    Just nl' -> line ++ [LexedChar '\n' nl']
-
 -- | See Note [Multiline string literals]
-resolveMultilineString :: LexedString loc -> LexedString loc
-resolveMultilineString = process
+postprocessMultiline :: Int -> String -> String
+postprocessMultiline commonWSPrefix =
+      rmCommonWhitespacePrefix
+  >>> collapseOnlyWsLines
+  >>> rmFirstNewline
+  >>> resolveEscapeChars
   where
-    process =
-          splitLines
-      >>> convertLeadingTabs
-      >>> rmCommonWhitespacePrefix
-      >>> stripOnlyWhitespace
-      >>> joinLines
-      >>> rmFirstNewline
-
-    convertLeadingTabs =
-      let convertLine col = \case
+    rmCommonWhitespacePrefix =
+      let go = \case
+            '\n' : s -> '\n' : go (dropLine commonWSPrefix s)
+            c : s -> c : go s
             [] -> []
-            c@(LexedChar ' ' _) : cs -> c : convertLine (col + 1) cs
-            LexedChar '\t' loc : cs ->
-              let fill = 8 - (col `mod` 8)
-               in replicate fill (LexedChar ' ' loc) ++ convertLine (col + fill) cs
-            c : cs -> c : cs
-       in mapLines (convertLine 0)
+          -- drop x characters from the string, or up to a newline, whichever
+          -- comes first
+          dropLine !x = \case
+            s | x <= 0 -> s
+            s@('\n' : _) -> s
+            _ : s -> dropLine (x - 1) s
+            [] -> []
+       in go
 
-    rmCommonWhitespacePrefix = \case
-      [] -> []
-      -- exclude the first line from this calculation
-      firstLine : strLines ->
-        let excludeWsOnlyLines = filterLines (not . all isLexedSpace)
-            commonWSPrefix =
-              case NonEmpty.nonEmpty (excludeWsOnlyLines strLines) of
-                Nothing -> 0
-                Just strLines' ->
-                  Foldable1.minimum $
-                    flip NonEmpty.map strLines' $ \(LexedLine line _) ->
-                      length $ takeWhile isLexedSpace line
-         in firstLine : mapLines (drop commonWSPrefix) strLines
-
-    stripOnlyWhitespace =
-      let stripWsOnlyLine line = if all isLexedSpace line then [] else line
-       in mapLines stripWsOnlyLine
+    collapseOnlyWsLines =
+      let go = \case
+            '\n' : s | Just s' <- checkAllWs s -> '\n' : go s'
+            c : s -> c : go s
+            [] -> []
+          checkAllWs = \case
+            -- got all the way to a newline or the end of the string, return
+            s@('\n' : _) -> Just s
+            s@[] -> Just s
+            -- found whitespace, continue
+            c : s | is_space c -> checkAllWs s
+            -- anything else, stop
+            _ -> Nothing
+       in go
 
     rmFirstNewline = \case
-      LexedChar '\n' _ : s -> s
+      '\n' : s -> s
       s -> s
+
+    -- resolve escape characters, deferred from lexString. guaranteed
+    -- to not throw any errors, since we already checked them in lexString
+    resolveEscapeChars = \case
+      [] -> []
+      '\\' : s ->
+        -- concretizing 'loc' to String:
+        --   resolveEscapeCharacter :: (String -> Maybe (Char, String)) -> String -> Either _ (Char, String)
+        case resolveEscapeCharacter uncons s of
+          Left e -> panic $ "resolving escape characters in multiline string unexpectedly found errors: " ++ show e
+          Right (c, s') -> c : resolveEscapeChars s'
+      c : s -> c : resolveEscapeChars s
+
+    uncons = \case
+      c : cs -> Just (c, cs)
+      [] -> Nothing
 
 -- -----------------------------------------------------------------------------
 -- Helpers
 
-isLexedSpace :: LexedChar loc -> Bool
-isLexedSpace = isSpace . unLexedChar
+isAnyChar :: Char -> Bool
+isAnyChar c
+  | c > '\x7f' = isPrint c
+  | otherwise  = is_any c

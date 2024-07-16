@@ -87,7 +87,7 @@ import qualified GHC.Data.Strict as Strict
 import Control.Monad
 import Control.Applicative
 import Data.Char
-import Data.List (stripPrefix, isInfixOf, partition, unfoldr)
+import Data.List (stripPrefix, isInfixOf, partition)
 import Data.List.NonEmpty ( NonEmpty(..) )
 import qualified Data.List.NonEmpty as NE
 import Data.Maybe
@@ -2226,65 +2226,9 @@ lex_quoted_label span buf _len _buf2 = do
 lex_string :: LexStringType -> P String
 lex_string strType = do
   start <- getInput
-  case lexString [] start of
-    Right (lexedStr, next) -> do
-      setInput next
-      either fromStringLexError pure $ resolveLexedString strType lexedStr
-    Left (e, s, i) -> do
-      -- see if we can find a smart quote in the string we've found so far.
-      -- if the built-up string s contains a smart double quote character, it was
-      -- likely the reason why the string literal was not lexed correctly
-      case filter (\(LexedChar c _) -> isDoubleSmartQuote c) s of
-        LexedChar c (AI loc _) : _ -> add_nonfatal_smart_quote_error c loc
-        _ -> pure ()
-
-      -- regardless whether we found a smart quote, throw a lexical error
-      setInput i >> lexError e
-  where
-    -- Given the (reversed) string we've seen so far and the current location,
-    -- return Right with the fully lexed string and the subsequent location,
-    -- or Left with the string we've seen so far and the location where lexing
-    -- failed.
-    lexString acc0 i0 = do
-      let acc = reverse acc0
-      case alexGetChar' i0 of
-        _ | Just i1 <- lexDelimiter i0 -> Right (acc, i1)
-
-        Just (c0, i1) -> do
-          let acc1 = LexedChar c0 i0 : acc0
-          case c0 of
-            '\\' -> do
-              case alexGetChar' i1 of
-                Just (c1, i2)
-                  | is_space c1 -> lexStringGap acc0 i2
-                  | otherwise -> lexString (LexedChar c1 i1 : acc1) i2
-                Nothing -> Left (LexStringCharLit, acc, i1)
-            _ | isAny c0 -> lexString acc1 i1
-            _ | strType == StringTypeMulti && c0 `elem` ['\n', '\t'] -> lexString acc1 i1
-            _ -> Left (LexStringCharLit, acc, i0)
-
-        Nothing -> Left (LexStringCharLit, acc, i0)
-
-    lexDelimiter i0 =
-      case strType of
-        StringTypeSingle -> do
-          ('"', i1) <- alexGetChar' i0
-          Just i1
-        StringTypeMulti -> do
-          ('"', i1) <- alexGetChar' i0
-          ('"', i2) <- alexGetChar' i1
-          ('"', i3) <- alexGetChar' i2
-          Just i3
-
-    lexStringGap acc0 i0 = do
-      let acc = reverse acc0
-      case alexGetChar' i0 of
-        Just (c0, i1) ->
-          case c0 of
-            '\\' -> lexString acc0 i1
-            _ | is_space c0 -> lexStringGap acc0 i1
-            _ -> Left (LexStringCharLit, acc, i0)
-        Nothing -> Left (LexStringCharLitEOF, acc, i0)
+  (str, next) <- either fromStringLexError pure $ lexString strType alexGetChar' start
+  setInput next
+  pure str
 
 
 lex_char_tok :: Action
@@ -2305,13 +2249,9 @@ lex_char_tok span buf _len _buf2 = do        -- We've seen '
                    return (L (mkPsSpan loc end2)  ITtyQuote)
 
         Just ('\\', i2@(AI end2 _)) -> do      -- We've seen 'backslash
-                  (LexedChar lit_ch _, rest) <-
+                  (lit_ch, i3) <-
                     either fromStringLexError pure $
-                      resolveEscapeCharacter (LexedChar '\\' i1) (asLexedString i2)
-                  i3 <-
-                    case rest of
-                      LexedChar _ i3 : _ -> pure i3
-                      [] -> lexError LexStringCharLitEOF
+                      resolveEscapeCharacter alexGetChar' i2
                   case alexGetChar' i3 of
                     Just ('\'', i4) -> do
                       setInput i4
@@ -2320,7 +2260,7 @@ lex_char_tok span buf _len _buf2 = do        -- We've seen '
                     _ -> lit_error i3
 
         Just (c, i2@(AI end2 _))
-                | not (isAny c) -> lit_error i1
+                | not (isAnyChar c) -> lit_error i1
                 | otherwise ->
 
                 -- We've seen 'x, where x is a valid character
@@ -2371,24 +2311,19 @@ lex_magic_hash i = do
         _other -> pure Nothing
     else pure Nothing
 
-isAny :: Char -> Bool
-isAny c | c > '\x7f' = isPrint c
-        | otherwise  = is_any c
-
--- | Returns a LexedString that, when iterated, lazily streams
--- successive characters from the AlexInput.
-asLexedString :: AlexInput -> LexedString AlexInput
-asLexedString = unfoldr toLexedChar
-  where
-    toLexedChar i =
-      case alexGetChar' i of
-        Just (c, i') -> Just (LexedChar c i, i')
-        Nothing -> Nothing
-
 fromStringLexError :: StringLexError AlexInput -> P a
 fromStringLexError = \case
-  SmartQuoteError c (AI loc _) -> add_smart_quote_error c loc
-  StringLexError _ i e -> setInput i >> lexError e
+  UnexpectedEOF i squote -> checkSQuote squote >> throw i LexStringCharLitEOF
+  BadCharInitialLex i squote -> checkSQuote squote >> throw i LexStringCharLit
+  EscapeBadChar i -> throw i LexStringCharLit
+  EscapeUnexpectedEOF i -> throw i LexStringCharLitEOF
+  EscapeNumRangeError i -> throw i LexNumEscapeRange
+  EscapeSmartQuoteError c (AI loc _) -> add_smart_quote_error c loc
+  where
+    throw i e = setInput i >> lexError e
+    checkSQuote = \case
+      NoSmartQuote -> pure ()
+      SmartQuote c (AI loc _) -> add_nonfatal_smart_quote_error c loc
 
 -- before calling lit_error, ensure that the current input is pointing to
 -- the position of the error in the buffer.  This is so that we can report
@@ -2396,12 +2331,6 @@ fromStringLexError = \case
 -- errors if they occur.
 lit_error :: AlexInput -> P a
 lit_error i = do setInput i; lexError LexStringCharLit
-
-getCharOrFail :: AlexInput -> P Char
-getCharOrFail i =  do
-  case alexGetChar' i of
-        Nothing -> lexError LexStringCharLitEOF
-        Just (c,i)  -> do setInput i; return c
 
 -- -----------------------------------------------------------------------------
 -- QuasiQuote
